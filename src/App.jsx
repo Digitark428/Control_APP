@@ -51,6 +51,31 @@ const fmtCompact = (n) => {
 
 const newId = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
 
+// Compresse une image en data URL carrée (256px) — léger, idéal pour avatar
+const readAvatarFile = (file) => new Promise((resolve, reject) => {
+  if (!file || !file.type.startsWith('image/')) { reject(new Error('Fichier image requis')); return; }
+  const reader = new FileReader();
+  reader.onerror = () => reject(new Error('Lecture impossible'));
+  reader.onload = () => {
+    const img = new Image();
+    img.onerror = () => reject(new Error('Image invalide'));
+    img.onload = () => {
+      const size = 256;
+      const canvas = document.createElement('canvas');
+      canvas.width = size; canvas.height = size;
+      const ctx = canvas.getContext('2d');
+      // Crop carré centré
+      const ratio = Math.min(img.width, img.height);
+      const sx = (img.width - ratio) / 2;
+      const sy = (img.height - ratio) / 2;
+      ctx.drawImage(img, sx, sy, ratio, ratio, 0, 0, size, size);
+      resolve(canvas.toDataURL('image/jpeg', 0.82));
+    };
+    img.src = reader.result;
+  };
+  reader.readAsDataURL(file);
+});
+
 const isExpenseDueInMonth = (exp, year, month) => {
   if (exp.frequency === 'monthly') return true;
   if (exp.frequency === 'bimonthly') return ((month - (exp.startMonth ?? 0)) % 2 + 2) % 2 === 0;
@@ -87,6 +112,9 @@ const DEFAULT_STATE = {
   varCategories: DEFAULT_VAR_CATEGORIES,
   varExpenses: [],
   clients: [],
+  profile: {
+    avatar: null, // data URL (base64) ou null
+  },
   settings: {
     ursaffRate: 0,
     weeklyUberObjective: 460,
@@ -119,6 +147,7 @@ const migrateState = (legacy) => {
     varCategories: legacy.varCategories || DEFAULT_VAR_CATEGORIES,
     varExpenses: legacy.varExpenses || [],
     clients: legacy.clients || [],
+    profile: legacy.profile || { avatar: null },
     settings: {
       ursaffRate: legacy.settings?.ursaffRate ?? 0,
       weeklyUberObjective: legacy.settings?.weeklyUberObjective ?? 460,
@@ -163,8 +192,10 @@ const useAppState = (user) => {
 
     loadState().then(remote => {
       if (remote) {
-        setState(remote);
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(remote));
+        // Backfill des nouveaux champs (profile, etc.) pour anciens états distants
+        const merged = { ...DEFAULT_STATE, ...remote, profile: { ...DEFAULT_STATE.profile, ...(remote.profile || {}) } };
+        setState(merged);
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(merged));
       }
       setSynced(true);
     });
@@ -273,18 +304,57 @@ const computeVarMonth = (state, year, month) => {
 const Card = ({ children, className = '', onClick, style = {} }) => (
   <div
     onClick={onClick}
-    style={style}
-    className={`rounded-2xl bg-[#1C1C1E] ${onClick ? 'active:bg-[#252527] active:scale-[0.98] cursor-pointer transition-all' : ''} ${className}`}
+    style={{
+      background: 'rgba(255,255,255,0.035)',
+      border: '1px solid rgba(255,255,255,0.06)',
+      boxShadow: '0 1px 0 rgba(255,255,255,0.03) inset, 0 8px 24px -12px rgba(0,0,0,0.5)',
+      ...style,
+    }}
+    className={`rounded-2xl ${onClick ? 'active:bg-white/[0.05] active:scale-[0.985] cursor-pointer transition-all duration-150' : ''} ${className}`}
   >
     {children}
   </div>
 );
 
+// Avatar : photo si dispo, sinon initiale sur fond glass argenté
+const Avatar = ({ src, initial = '?', size = 40, onClick, ring = false }) => {
+  const fontSize = Math.round(size * 0.4);
+  return (
+    <button
+      onClick={onClick}
+      style={{
+        width: size,
+        height: size,
+        borderRadius: '50%',
+        background: src
+          ? 'transparent'
+          : 'linear-gradient(135deg, rgba(255,255,255,0.12) 0%, rgba(255,255,255,0.04) 100%)',
+        border: ring ? '2px solid rgba(255,255,255,0.15)' : '1px solid rgba(255,255,255,0.08)',
+        padding: 0,
+        overflow: 'hidden',
+        flexShrink: 0,
+        position: 'relative',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        cursor: onClick ? 'pointer' : 'default',
+        boxShadow: '0 4px 16px -4px rgba(0,0,0,0.5)',
+      }}
+      className={onClick ? 'active:scale-95 transition-transform' : ''}
+    >
+      {src
+        ? <img src={src} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+        : <span style={{ color: '#fff', fontSize, fontWeight: 600, letterSpacing: '-0.02em' }}>{initial}</span>
+      }
+    </button>
+  );
+};
+
 const TopBar = ({ title, subtitle, right }) => (
-  <div className="flex items-end justify-between px-5 pt-3 pb-4">
+  <div className="flex items-end justify-between px-5 pt-4 pb-4">
     <div>
-      {subtitle && <div className="text-xs text-zinc-500 font-medium tracking-wide uppercase mb-1">{subtitle}</div>}
-      <h1 className="text-[28px] font-bold text-white leading-tight tracking-tight">{title}</h1>
+      {subtitle && <div className="text-[11px] text-zinc-500 font-semibold tracking-[0.12em] uppercase mb-1.5">{subtitle}</div>}
+      <h1 className="text-[28px] font-bold text-white leading-tight" style={{ letterSpacing: '-0.7px' }}>{title}</h1>
     </div>
     {right}
   </div>
@@ -300,15 +370,15 @@ const MonthSwitcher = ({ year, month, onChange }) => {
   };
   const isCurrent = year === TODAY_YEAR && month === TODAY_MONTH;
   return (
-    <div className="flex items-center gap-1 bg-[#1C1C1E] rounded-full px-1 py-1">
-      <button onClick={() => go(-1)} className="w-8 h-8 flex items-center justify-center rounded-full active:bg-[#2C2C2E]">
+    <div className="flex items-center gap-0.5 rounded-full px-1 py-1" style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.06)' }}>
+      <button onClick={() => go(-1)} className="w-8 h-8 flex items-center justify-center rounded-full active:bg-white/[0.08]">
         <ChevronLeft className="w-4 h-4 text-zinc-400" />
       </button>
-      <div className="px-2 text-sm font-semibold text-white min-w-[80px] text-center">
+      <div className="px-2 text-[13px] font-semibold text-white min-w-[78px] text-center" style={{ letterSpacing: '-0.1px' }}>
         {MONTHS_SHORT[month]} {String(year).slice(2)}
         {isCurrent && <span className="ml-1 inline-block w-1.5 h-1.5 rounded-full bg-emerald-400 align-middle" />}
       </div>
-      <button onClick={() => go(1)} className="w-8 h-8 flex items-center justify-center rounded-full active:bg-[#2C2C2E]">
+      <button onClick={() => go(1)} className="w-8 h-8 flex items-center justify-center rounded-full active:bg-white/[0.08]">
         <ChevronRight className="w-4 h-4 text-zinc-400" />
       </button>
     </div>
@@ -319,23 +389,30 @@ const Sheet = ({ open, onClose, children, title }) => {
   if (!open) return null;
   return (
     <div className="fixed inset-0 z-50 flex items-end justify-center" onClick={onClose}>
-      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" style={{ WebkitBackdropFilter: 'blur(4px)' }} />
+      <div className="absolute inset-0 bg-black/70 backdrop-blur-md" style={{ WebkitBackdropFilter: 'blur(8px)' }} />
       <div
         onClick={(e) => e.stopPropagation()}
-        className="relative w-full max-w-md bg-[#1C1C1E] rounded-t-3xl pb-8 max-h-[90vh] overflow-y-auto"
-        style={{ animation: 'slideUp 0.25s cubic-bezier(0.32, 0.72, 0, 1)' }}
+        className="relative w-full max-w-md rounded-t-[28px] pb-8 max-h-[90vh] overflow-y-auto"
+        style={{
+          animation: 'slideUp 0.32s cubic-bezier(0.32, 0.72, 0, 1)',
+          background: 'linear-gradient(180deg, #161618 0%, #0E0E10 100%)',
+          border: '1px solid rgba(255,255,255,0.07)',
+          borderBottom: 'none',
+          boxShadow: '0 -24px 60px -10px rgba(0,0,0,0.7)',
+        }}
       >
-        <div className="sticky top-0 bg-[#1C1C1E] pt-3 pb-2 px-5 rounded-t-3xl z-10">
-          <div className="w-10 h-1 bg-zinc-700 rounded-full mx-auto mb-3" />
+        <div className="sticky top-0 pt-3 pb-3 px-5 rounded-t-[28px] z-10" style={{ background: 'linear-gradient(180deg, #161618 70%, rgba(22,22,24,0))' }}>
+          <div className="w-9 h-[3px] bg-white/15 rounded-full mx-auto mb-3" />
           <div className="flex items-center justify-between">
-            <h2 className="text-lg font-semibold text-white">{title}</h2>
-            <button onClick={onClose} className="w-8 h-8 flex items-center justify-center rounded-full bg-[#2C2C2E] active:bg-[#3A3A3C]">
+            <h2 className="text-[18px] font-bold text-white" style={{ letterSpacing: '-0.4px' }}>{title}</h2>
+            <button onClick={onClose} className="w-9 h-9 flex items-center justify-center rounded-full bg-white/[0.06] border border-white/[0.08] active:bg-white/[0.1]">
               <X className="w-4 h-4 text-zinc-400" />
             </button>
           </div>
         </div>
-        <div className="px-5 pt-3">{children}</div>
+        <div className="px-5 pt-2">{children}</div>
       </div>
+      <style>{`@keyframes slideUp { from { transform: translateY(100%); } to { transform: translateY(0); }}`}</style>
     </div>
   );
 };
@@ -425,24 +502,24 @@ const Dashboard = ({ state, year, month, setMonth, openAddTx, openAddVar, setTab
     <div className="pb-32">
 
       {/* ── WELCOME HEADER ───────────────────────────────────────────────── */}
-      <div className="px-5 pt-4 pb-2 flex items-center justify-between anim-1">
-        <div>
-          <div className="text-[13px] text-zinc-500 font-medium">{MONTHS_FR[month]} {year}</div>
-          <h1 className="text-[26px] font-bold text-white leading-tight tracking-tight mt-0.5">
-            Bonjour {userFirstName} 👋
-          </h1>
-          <div className="text-[13px] text-zinc-500 mt-0.5">Prêt à contrôler tes finances</div>
-        </div>
-        <div className="flex items-center gap-2">
-          <MonthSwitcher year={year} month={month} onChange={(y, m) => setMonth(y, m)} />
-          <button
+      <div className="px-5 pt-5 pb-3 flex items-center justify-between anim-1">
+        <div className="flex items-center gap-3 min-w-0">
+          <Avatar
+            src={state.profile?.avatar}
+            initial={(user?.user_metadata?.first_name || user?.email || '?')[0].toUpperCase()}
+            size={48}
+            ring
             onClick={() => setTab('profile')}
-            className="w-10 h-10 rounded-full bg-[#1C1C1E] border border-zinc-800/60 flex items-center justify-center active:bg-[#2C2C2E]"
-          >
-            <span className="text-white text-[15px] font-bold">
-              {(user?.user_metadata?.first_name || user?.email || '?')[0].toUpperCase()}
-            </span>
-          </button>
+          />
+          <div className="min-w-0">
+            <div className="text-[12px] text-zinc-500 font-medium tracking-wide">{MONTHS_FR[month]} {year}</div>
+            <h1 className="text-[22px] font-bold text-white leading-tight tracking-tight truncate" style={{ letterSpacing: '-0.4px' }}>
+              Bonjour {userFirstName}
+            </h1>
+          </div>
+        </div>
+        <div className="flex items-center gap-2 flex-shrink-0">
+          <MonthSwitcher year={year} month={month} onChange={(y, m) => setMonth(y, m)} />
         </div>
       </div>
 
@@ -2344,6 +2421,30 @@ const ProfilePage = ({ user, state, setState, onSignOut }) => {
   const username = user?.user_metadata?.username || '';
   const email = user?.email || '';
   const initial = (firstName || email || '?')[0].toUpperCase();
+  const avatar = state.profile?.avatar || null;
+  const fileInputRef = useRef(null);
+  const [avatarMsg, setAvatarMsg] = useState(null);
+
+  const handleAvatarChange = async (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = ''; // reset pour permettre re-sélection du même fichier
+    if (!file) return;
+    if (file.size > 5 * 1024 * 1024) { setAvatarMsg({ type: 'err', text: 'Image trop lourde (max 5 Mo).' }); return; }
+    try {
+      const dataUrl = await readAvatarFile(file);
+      setState(s => ({ ...s, profile: { ...(s.profile || {}), avatar: dataUrl } }));
+      setAvatarMsg({ type: 'ok', text: 'Photo mise à jour.' });
+      setTimeout(() => setAvatarMsg(null), 2000);
+    } catch (err) {
+      setAvatarMsg({ type: 'err', text: err.message || 'Erreur lors du chargement.' });
+    }
+  };
+
+  const removeAvatar = () => {
+    setState(s => ({ ...s, profile: { ...(s.profile || {}), avatar: null } }));
+    setAvatarMsg({ type: 'ok', text: 'Photo retirée.' });
+    setTimeout(() => setAvatarMsg(null), 2000);
+  };
 
   const openEdit = (field) => {
     setEditField(field);
@@ -2389,12 +2490,85 @@ const ProfilePage = ({ user, state, setState, onSignOut }) => {
       <div className="px-5">
         {/* Avatar */}
         <div className="flex flex-col items-center py-6">
-          <div className="w-24 h-24 rounded-full bg-gradient-to-br from-emerald-500 to-emerald-700 flex items-center justify-center mb-4 shadow-xl shadow-emerald-900/30">
-            <span className="text-white text-[42px] font-bold">{initial}</span>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/*"
+            onChange={handleAvatarChange}
+            style={{ display: 'none' }}
+          />
+          <div
+            onClick={() => fileInputRef.current?.click()}
+            className="relative active:scale-[0.97] transition-transform cursor-pointer"
+            style={{
+              width: 112,
+              height: 112,
+              borderRadius: '50%',
+              padding: 3,
+              background: 'linear-gradient(135deg, rgba(255,255,255,0.25) 0%, rgba(255,255,255,0.05) 100%)',
+              marginBottom: 18,
+              boxShadow: '0 16px 40px -10px rgba(0,0,0,0.7)',
+            }}
+          >
+            <div style={{
+              width: '100%',
+              height: '100%',
+              borderRadius: '50%',
+              overflow: 'hidden',
+              background: avatar ? 'transparent' : 'linear-gradient(135deg, #2a2a2c 0%, #18181a 100%)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              position: 'relative',
+            }}>
+              {avatar
+                ? <img src={avatar} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                : <span style={{ color: '#fff', fontSize: 44, fontWeight: 600, letterSpacing: '-1px' }}>{initial}</span>
+              }
+              {/* Badge appareil photo */}
+              <div style={{
+                position: 'absolute',
+                bottom: 0,
+                right: 0,
+                width: 32,
+                height: 32,
+                borderRadius: '50%',
+                background: 'linear-gradient(180deg, #FAFAFA 0%, #C7C7CC 100%)',
+                border: '3px solid #000',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                boxShadow: '0 2px 8px rgba(0,0,0,0.4)',
+              }}>
+                <Camera className="w-3.5 h-3.5 text-black" strokeWidth={2.4} />
+              </div>
+            </div>
           </div>
-          <div className="text-[20px] font-bold text-white">{firstName || 'Mon compte'}</div>
+          <div className="text-[20px] font-bold text-white" style={{ letterSpacing: '-0.4px' }}>{firstName || 'Mon compte'}</div>
           {username && <div className="text-[14px] text-zinc-500 mt-1">@{username}</div>}
           <div className="text-[13px] text-zinc-600 mt-0.5">{email}</div>
+          <div className="flex gap-2 mt-4">
+            <button
+              onClick={() => fileInputRef.current?.click()}
+              className="px-4 py-2 rounded-full text-[12.5px] font-semibold text-black active:scale-[0.97] transition-transform"
+              style={{ background: 'linear-gradient(180deg, #FAFAFA 0%, #C7C7CC 100%)', boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.6)' }}
+            >
+              {avatar ? 'Changer la photo' : 'Ajouter une photo'}
+            </button>
+            {avatar && (
+              <button
+                onClick={removeAvatar}
+                className="px-4 py-2 rounded-full text-[12.5px] font-semibold text-white bg-white/5 border border-white/10 active:scale-[0.97] transition-transform"
+              >
+                Retirer
+              </button>
+            )}
+          </div>
+          {avatarMsg && (
+            <div className={`mt-3 px-3 py-1.5 rounded-full text-[12px] font-medium ${avatarMsg.type === 'ok' ? 'bg-emerald-500/15 text-emerald-400' : 'bg-rose-500/15 text-rose-400'}`}>
+              {avatarMsg.text}
+            </div>
+          )}
         </div>
 
         {msg && (
@@ -2555,7 +2729,17 @@ const TabBar = ({ tab, setTab }) => {
 
   return (
     <div className="fixed bottom-0 left-0 right-0 z-40 flex justify-center px-4 pb-5 pt-3" style={{ pointerEvents: 'none' }}>
-      <div className="bg-[#1C1C1E]/95 backdrop-blur-xl rounded-full px-2 py-2 flex items-center gap-1 shadow-2xl border border-zinc-800/40" style={{ pointerEvents: 'auto', WebkitBackdropFilter: 'blur(20px)' }}>
+      <div
+        className="backdrop-blur-2xl rounded-full px-2 py-2 flex items-center gap-1"
+        style={{
+          pointerEvents: 'auto',
+          WebkitBackdropFilter: 'blur(24px) saturate(180%)',
+          backdropFilter: 'blur(24px) saturate(180%)',
+          background: 'rgba(18,18,20,0.78)',
+          border: '1px solid rgba(255,255,255,0.08)',
+          boxShadow: '0 20px 48px -12px rgba(0,0,0,0.6), inset 0 1px 0 rgba(255,255,255,0.05)',
+        }}
+      >
         {tabs.map(t => {
           const Icon = t.icon;
           const active = tab === t.id;
@@ -2563,10 +2747,14 @@ const TabBar = ({ tab, setTab }) => {
             <button
               key={t.id}
               onClick={() => setTab(t.id)}
-              className={`flex items-center justify-center transition-all duration-200 ${active ? 'px-4 py-2.5 bg-white rounded-full' : 'p-2.5'}`}
+              className={`flex items-center justify-center transition-all duration-200 ${active ? 'px-4 py-2.5 rounded-full' : 'p-2.5'}`}
+              style={active ? {
+                background: 'linear-gradient(180deg, #FAFAFA 0%, #C7C7CC 100%)',
+                boxShadow: '0 2px 12px -2px rgba(255,255,255,0.2), inset 0 1px 0 rgba(255,255,255,0.6)',
+              } : {}}
             >
               <Icon className={`w-4 h-4 ${active ? 'text-black' : 'text-zinc-500'}`} strokeWidth={active ? 2.5 : 2} />
-              {active && <span className="text-black text-[12px] font-semibold ml-1.5 tracking-tight">{t.label}</span>}
+              {active && <span className="text-black text-[12px] font-semibold ml-1.5" style={{ letterSpacing: '-0.1px' }}>{t.label}</span>}
             </button>
           );
         })}
@@ -2594,7 +2782,7 @@ export default function App() {
   if (user === undefined) {
     return (
       <div style={{ minHeight: '100vh', background: '#000', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-        <div style={{ width: 24, height: 24, border: '2px solid #2C2C2E', borderTopColor: '#30D158', borderRadius: '50%', animation: 'spin 0.7s linear infinite' }} />
+        <div style={{ width: 28, height: 28, border: '2px solid rgba(255,255,255,0.08)', borderTopColor: 'rgba(255,255,255,0.9)', borderRadius: '50%', animation: 'spin 0.7s linear infinite' }} />
         <style>{`@keyframes spin { to { transform: rotate(360deg); }}`}</style>
       </div>
     );
