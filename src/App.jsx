@@ -621,6 +621,31 @@ const Dashboard = ({ state, year, month, setMonth, openAddTx, setTab }) => {
         </Card>
       </div>
 
+      {/* ── DÉPENSES DU MOIS ─────────────────────────────────────────────── */}
+      <div className="px-5 mt-2 anim-4">
+        <Card className="p-5" onClick={() => setTab('varexp')}>
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className="w-9 h-9 rounded-2xl bg-purple-500/15 flex items-center justify-center flex-shrink-0">
+                <ShoppingBag className="w-4 h-4 text-purple-400" />
+              </div>
+              <div>
+                <div className="text-[11px] uppercase tracking-wider text-zinc-500 font-medium">
+                  {MONTHS_SHORT[month]} · Dépenses
+                </div>
+                <div className="text-[15px] font-bold text-white mt-0.5">
+                  {varData.items.length} dépense{varData.items.length !== 1 ? 's' : ''}
+                </div>
+              </div>
+            </div>
+            <div className="text-right">
+              <div className="text-[10px] uppercase tracking-wider text-zinc-600 font-medium mb-0.5">Total</div>
+              <div className="text-[15px] font-bold text-purple-400">−{fmt(varData.total, { decimals: 0 })} €</div>
+            </div>
+          </div>
+        </Card>
+      </div>
+
       {/* ── ACTIVITÉS ────────────────────────────────────────────────────── */}
       <div className="px-5 mt-6 anim-5">
         <div className="flex items-center justify-between mb-3">
@@ -1026,6 +1051,7 @@ const SettingsPage = ({ state, setState, user, onSignOut }) => {
   const [editExpense, setEditExpense] = useState(null);
   const [editCategory, setEditCategory] = useState(null);
   const [ursaffInput, setUrsaffInput] = useState((state.settings.ursaffRate * 100).toString());
+  const [resetSheet, setResetSheet] = useState(false);
 
   useEffect(() => {
     setUrsaffInput((state.settings.ursaffRate * 100).toString());
@@ -1208,6 +1234,24 @@ const SettingsPage = ({ state, setState, user, onSignOut }) => {
         </Card>
 
         <div className="mt-8 mb-2">
+          <div className="text-[11px] uppercase tracking-wider font-semibold text-zinc-500 mb-2 px-1">Réinitialisation</div>
+          <Card>
+            <button
+              onClick={() => setResetSheet(true)}
+              className="w-full flex items-center justify-between p-4 active:bg-[#252527] cursor-pointer"
+            >
+              <div className="flex items-center gap-3">
+                <div className="w-7 h-7 rounded-xl bg-rose-500/15 flex items-center justify-center flex-shrink-0">
+                  <Trash2 className="w-3.5 h-3.5 text-rose-400" />
+                </div>
+                <span className="text-[14px] font-medium text-rose-400">Réinitialiser mon compte</span>
+              </div>
+              <ChevronRight className="w-4 h-4 text-zinc-600" />
+            </button>
+          </Card>
+        </div>
+
+        <div className="mt-8 mb-2">
           <div className="text-[11px] uppercase tracking-wider font-semibold text-zinc-500 mb-2 px-1">Compte</div>
           <Card>
             <div className="flex items-center gap-3 p-4 border-b border-zinc-800/60">
@@ -1256,6 +1300,38 @@ const SettingsPage = ({ state, setState, user, onSignOut }) => {
       <ActivityEditor activity={editActivity} setState={setState} state={state} onClose={() => setEditActivity(null)} txCount={editActivity ? (txCountByActivity[editActivity.id] || 0) : 0} />
       <ExpenseEditor expense={editExpense} setState={setState} state={state} onClose={() => setEditExpense(null)} />
       <CategoryEditor category={editCategory} setState={setState} state={state} onClose={() => setEditCategory(null)} />
+
+      <Sheet open={resetSheet} onClose={() => setResetSheet(false)} title="Réinitialiser">
+        <div className="space-y-3 pb-2">
+          <p className="text-[13px] text-zinc-400 leading-relaxed">
+            Choisis ce que tu veux réinitialiser. Cette action est <span className="text-rose-400 font-medium">irréversible</span>.
+          </p>
+
+          <button
+            onClick={() => {
+              if (!window.confirm('Effacer toutes les transactions, ventes et dépenses ? Tes activités et catégories seront conservées.')) return;
+              setState(s => ({ ...s, transactions: [], varExpenses: [], paidExpenses: {}, expenseOverrides: {}, notes: {} }));
+              setResetSheet(false);
+            }}
+            className="w-full p-4 bg-[#2C2C2E] rounded-2xl text-left active:bg-[#3A3A3C]"
+          >
+            <div className="text-[14px] font-semibold text-white mb-1">Réinitialiser les chiffres</div>
+            <div className="text-[12px] text-zinc-500 leading-relaxed">Supprime toutes les ventes, dépenses et historique. Tes activités et catégories sont conservées.</div>
+          </button>
+
+          <button
+            onClick={() => {
+              if (!window.confirm('Tout réinitialiser ? Activités, catégories, données… tout sera effacé. Cette action est irréversible.')) return;
+              setState(DEFAULT_STATE);
+              setResetSheet(false);
+            }}
+            className="w-full p-4 bg-rose-500/10 border border-rose-500/20 rounded-2xl text-left active:bg-rose-500/20"
+          >
+            <div className="text-[14px] font-semibold text-rose-400 mb-1">Tout réinitialiser</div>
+            <div className="text-[12px] text-zinc-500 leading-relaxed">Remet l'application à zéro complet : activités, catégories, données, tout.</div>
+          </button>
+        </div>
+      </Sheet>
     </div>
   );
 };
