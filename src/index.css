@@ -7,11 +7,20 @@
   -webkit-touch-callout: none;
 }
 
-body {
+html, body {
   background: #000;
+  color: #fff;
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", "Inter", "Helvetica Neue", sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+body {
   overscroll-behavior: none;
   -webkit-overflow-scrolling: touch;
   cursor: pointer;
+  letter-spacing: -0.01em;
 }
 
 button, a, [role="button"] {
@@ -23,3 +32,12 @@ input[type="date"]::-webkit-calendar-picker-indicator {
   filter: invert(1);
   opacity: 0.5;
 }
+
+/* Scrollbar discret style Apple */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.08); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.15); }
+
+/* Sélection */
+::selection { background: rgba(255,255,255,0.2); color: #fff; }

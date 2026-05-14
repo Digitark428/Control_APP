@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { loadState, saveState } from './lib/db';
 import { supabase } from './lib/supabase';
 import AuthScreen from './components/AuthScreen';
-import { Plus, ChevronLeft, ChevronRight, X, Trash2, Wallet, Edit3, Check, Home, BarChart3, Receipt, Sliders, AlertCircle, Power, Bell, Clock, FileText, EyeOff, ShoppingBag } from 'lucide-react';
+import { Plus, ChevronLeft, ChevronRight, X, Trash2, Wallet, Edit3, Check, Home, BarChart3, Receipt, Sliders, AlertCircle, Power, Bell, Clock, FileText, EyeOff, ShoppingBag, User, TrendingUp, Users, Camera, Lock, Mail } from 'lucide-react';
 
 // ---------------------------------------------------------------------------
 // Constants & defaults
@@ -86,6 +86,7 @@ const DEFAULT_STATE = {
   expenseOverrides: {},
   varCategories: DEFAULT_VAR_CATEGORIES,
   varExpenses: [],
+  clients: [],
   settings: {
     ursaffRate: 0,
     weeklyUberObjective: 460,
@@ -117,6 +118,7 @@ const migrateState = (legacy) => {
     expenseOverrides: legacy.expenseOverrides || {},
     varCategories: legacy.varCategories || DEFAULT_VAR_CATEGORIES,
     varExpenses: legacy.varExpenses || [],
+    clients: legacy.clients || [],
     settings: {
       ursaffRate: legacy.settings?.ursaffRate ?? 0,
       weeklyUberObjective: legacy.settings?.weeklyUberObjective ?? 460,
@@ -389,7 +391,7 @@ const useReminders = (state) => {
 // Dashboard
 // ---------------------------------------------------------------------------
 
-const Dashboard = ({ state, year, month, setMonth, openAddTx, setTab }) => {
+const Dashboard = ({ state, year, month, setMonth, openAddTx, openAddVar, setTab, user }) => {
   const data = useMemo(() => computeMonth(state, year, month), [state, year, month]);
   const varData = useMemo(() => computeVarMonth(state, year, month), [state, year, month]);
   const quarter = getQuarter(month);
@@ -414,18 +416,53 @@ const Dashboard = ({ state, year, month, setMonth, openAddTx, setTab }) => {
   const maxAbsNet = Math.max(1, ...last6.map(d => Math.abs(d.net)));
 
   const benefice = data.brut - data.ursaff;
-  const argentVrai = benefice - data.chargesPaid;
+  const argentVrai = benefice - data.chargesPaid - varData.total;
   const chargesUnpaid = data.charges - data.chargesPaid;
   const chargesPaidCount = data.dueExpenses.filter(e => e.paid).length;
+  const userFirstName = user?.user_metadata?.first_name || user?.user_metadata?.username || 'toi';
 
   return (
     <div className="pb-32">
 
-      <TopBar
-        subtitle="Aperçu"
-        title={MONTHS_FR[month] + ' ' + year}
-        right={<MonthSwitcher year={year} month={month} onChange={(y, m) => setMonth(y, m)} />}
-      />
+      {/* ── WELCOME HEADER ───────────────────────────────────────────────── */}
+      <div className="px-5 pt-4 pb-2 flex items-center justify-between anim-1">
+        <div>
+          <div className="text-[13px] text-zinc-500 font-medium">{MONTHS_FR[month]} {year}</div>
+          <h1 className="text-[26px] font-bold text-white leading-tight tracking-tight mt-0.5">
+            Bonjour {userFirstName} 👋
+          </h1>
+          <div className="text-[13px] text-zinc-500 mt-0.5">Prêt à contrôler tes finances</div>
+        </div>
+        <div className="flex items-center gap-2">
+          <MonthSwitcher year={year} month={month} onChange={(y, m) => setMonth(y, m)} />
+          <button
+            onClick={() => setTab('profile')}
+            className="w-10 h-10 rounded-full bg-[#1C1C1E] border border-zinc-800/60 flex items-center justify-center active:bg-[#2C2C2E]"
+          >
+            <span className="text-white text-[15px] font-bold">
+              {(user?.user_metadata?.first_name || user?.email || '?')[0].toUpperCase()}
+            </span>
+          </button>
+        </div>
+      </div>
+
+      {/* ── QUICK ACTIONS ────────────────────────────────────────────────── */}
+      <div className="px-5 mb-4 anim-1">
+        <div className="flex gap-2">
+          <button
+            onClick={openAddTx}
+            className="flex-1 flex items-center justify-center gap-2 py-3 bg-white text-black rounded-2xl text-[13px] font-semibold active:scale-[0.97] transition-transform"
+          >
+            <Plus className="w-4 h-4" /> Ajouter une vente
+          </button>
+          <button
+            onClick={openAddVar}
+            className="flex-1 flex items-center justify-center gap-2 py-3 bg-[#1C1C1E] border border-zinc-800/60 text-white rounded-2xl text-[13px] font-semibold active:scale-[0.97] transition-transform"
+          >
+            <ShoppingBag className="w-3.5 h-3.5 text-rose-400" /> Ajouter une dépense
+          </button>
+        </div>
+      </div>
 
       {/* Reminders strip */}
       {reminders.length > 0 && (
@@ -499,19 +536,30 @@ const Dashboard = ({ state, year, month, setMonth, openAddTx, setTab }) => {
       {/* ── BLOC 2 : Bénéfice après URSSAF ──────────────────────────────── */}
       <div className="px-5 mt-3 anim-2">
         <div
-          className="rounded-3xl p-6"
-          style={{ background: 'linear-gradient(135deg, #1C1C1E 0%, #252527 100%)', border: '1px solid rgba(255,255,255,0.06)' }}
+          className="rounded-3xl p-6 relative overflow-hidden"
+          style={{
+            background: benefice >= 0
+              ? 'linear-gradient(135deg, #0D2B1A 0%, #0A2015 100%)'
+              : 'linear-gradient(135deg, #2B0D0D 0%, #200A0A 100%)',
+            border: benefice >= 0 ? '1px solid rgba(48,209,88,0.18)' : '1px solid rgba(255,69,58,0.18)'
+          }}
         >
+          <div className="absolute -top-8 -right-8 w-36 h-36 rounded-full opacity-10 blur-2xl pointer-events-none"
+            style={{ backgroundColor: benefice >= 0 ? '#30D158' : '#FF453A' }} />
           <div className="flex items-start justify-between">
             <div>
-              <div className="text-[11px] font-semibold tracking-[0.16em] uppercase text-zinc-500 mb-1">
+              <div className="text-[11px] font-semibold tracking-[0.16em] uppercase mb-1"
+                style={{ color: benefice >= 0 ? 'rgba(48,209,88,0.6)' : 'rgba(255,69,58,0.6)' }}>
                 Bénéfice après URSSAF
               </div>
               <div className="flex items-baseline gap-2 mt-1">
-                <span className={`text-[44px] font-bold tracking-tight leading-none ${benefice >= 0 ? 'text-white' : 'text-rose-400'}`}>
-                  {fmt(benefice, { decimals: 0 })}
+                <span className={`text-[44px] font-bold tracking-tight leading-none ${benefice >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                  {benefice >= 0 ? '+' : ''}{fmt(benefice, { decimals: 0 })}
                 </span>
-                <span className="text-2xl font-medium text-zinc-500">€</span>
+                <span className="text-2xl font-medium" style={{ color: benefice >= 0 ? 'rgba(48,209,88,0.5)' : 'rgba(255,69,58,0.5)' }}>€</span>
+              </div>
+              <div className="text-[12px] mt-1.5" style={{ color: benefice >= 0 ? 'rgba(48,209,88,0.45)' : 'rgba(255,69,58,0.45)' }}>
+                CA − URSSAF
               </div>
             </div>
             <div className="mt-1 text-right">
@@ -520,83 +568,102 @@ const Dashboard = ({ state, year, month, setMonth, openAddTx, setTab }) => {
               <div className="text-[10px] text-zinc-600 mt-0.5">{Math.round(state.settings.ursaffRate * 100)}% du CA</div>
             </div>
           </div>
-
-          {/* Progress bar brut → bénéfice */}
           <div className="mt-4">
-            <div className="h-1.5 bg-zinc-800 rounded-full overflow-hidden">
+            <div className="h-1.5 rounded-full overflow-hidden" style={{ backgroundColor: 'rgba(255,255,255,0.06)' }}>
               <div
                 className="h-full rounded-full transition-all duration-700"
                 style={{
                   width: data.brut > 0 ? `${Math.min(100, (benefice / data.brut) * 100)}%` : '0%',
-                  background: 'linear-gradient(90deg, #30D158, #00D26A)'
+                  background: benefice >= 0 ? 'linear-gradient(90deg, #30D158, #00D26A)' : 'linear-gradient(90deg, #FF453A, #FF6B6B)'
                 }}
               />
             </div>
             <div className="flex justify-between mt-1.5">
-              <span className="text-[10px] text-zinc-600">0 €</span>
-              <span className="text-[10px] text-zinc-600">{fmt(data.brut, { decimals: 0 })} €</span>
+              <span className="text-[10px] text-zinc-700">0 €</span>
+              <span className="text-[10px] text-zinc-700">{fmt(data.brut, { decimals: 0 })} €</span>
             </div>
           </div>
         </div>
       </div>
 
-      {/* ── BLOC 3 : Argent réellement disponible ───────────────────────── */}
+      {/* ── DÉPENSES DU MOIS (rouge) ─────────────────────────────────────── */}
       <div className="px-5 mt-3 anim-3">
+        <Card className="p-5" onClick={() => setTab('varexp')}>
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className="w-9 h-9 rounded-2xl bg-rose-500/15 flex items-center justify-center flex-shrink-0">
+                <ShoppingBag className="w-4 h-4 text-rose-400" />
+              </div>
+              <div>
+                <div className="text-[11px] uppercase tracking-wider text-zinc-500 font-medium">
+                  {MONTHS_SHORT[month]} · Dépenses
+                </div>
+                <div className="text-[15px] font-bold text-white mt-0.5">
+                  {varData.items.length} dépense{varData.items.length !== 1 ? 's' : ''}
+                </div>
+              </div>
+            </div>
+            <div className="text-right">
+              <div className="text-[10px] uppercase tracking-wider text-zinc-600 font-medium mb-0.5">Total</div>
+              <div className="text-[15px] font-bold text-rose-400">−{fmt(varData.total, { decimals: 0 })} €</div>
+            </div>
+          </div>
+        </Card>
+      </div>
+
+      {/* ── ARGENT RÉELLEMENT DISPONIBLE (neutre) ────────────────────────── */}
+      <div className="px-5 mt-2 anim-4">
         <div
           className="rounded-3xl p-6 relative overflow-hidden"
-          style={{
-            background: argentVrai >= 0
-              ? 'linear-gradient(135deg, #0D2B1A 0%, #0A2015 100%)'
-              : 'linear-gradient(135deg, #2B0D0D 0%, #200A0A 100%)',
-            border: argentVrai >= 0 ? '1px solid rgba(48,209,88,0.18)' : '1px solid rgba(255,69,58,0.18)'
-          }}
+          style={{ background: 'linear-gradient(135deg, #1C1C1E 0%, #252527 100%)', border: '1px solid rgba(255,255,255,0.06)' }}
         >
-          {/* Glow orb */}
-          <div
-            className="absolute -top-8 -right-8 w-36 h-36 rounded-full opacity-10 blur-2xl pointer-events-none"
-            style={{ backgroundColor: argentVrai >= 0 ? '#30D158' : '#FF453A' }}
-          />
-
-          <div className="text-[11px] font-semibold tracking-[0.16em] uppercase mb-1"
-            style={{ color: argentVrai >= 0 ? 'rgba(48,209,88,0.6)' : 'rgba(255,69,58,0.6)' }}>
+          <div className="text-[11px] font-semibold tracking-[0.16em] uppercase text-zinc-500 mb-1">
             Argent réellement disponible
           </div>
           <div className="flex items-baseline gap-2 mt-1">
-            <span className={`text-[52px] font-bold tracking-tight leading-none ${argentVrai >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+            <span className={`text-[52px] font-bold tracking-tight leading-none ${argentVrai >= 0 ? 'text-white' : 'text-rose-400'}`}>
               {argentVrai >= 0 ? '+' : ''}{fmt(argentVrai, { decimals: 0 })}
             </span>
-            <span className="text-2xl font-medium" style={{ color: argentVrai >= 0 ? 'rgba(48,209,88,0.5)' : 'rgba(255,69,58,0.5)' }}>€</span>
+            <span className="text-2xl font-medium text-zinc-500">€</span>
           </div>
-          <div className="text-[12px] mt-2" style={{ color: argentVrai >= 0 ? 'rgba(48,209,88,0.5)' : 'rgba(255,69,58,0.5)' }}>
-            bénéfice − charges fixes payées
+          <div className="text-[12px] mt-1.5 text-zinc-600">
+            bénéfice − charges payées − dépenses
           </div>
 
-          {/* Deduction rows */}
-          <div className="mt-5">
-            {/* Charges fixes */}
+          <div className="mt-5 space-y-3">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2.5">
-                <div className="w-7 h-7 rounded-xl flex items-center justify-center" style={{ backgroundColor: 'rgba(255,255,255,0.06)' }}>
+                <div className="w-7 h-7 rounded-xl bg-zinc-800/80 flex items-center justify-center">
                   <Receipt className="w-3.5 h-3.5 text-zinc-400" />
                 </div>
                 <div>
                   <div className="text-[13px] font-medium text-zinc-200">Charges fixes</div>
-                  <div className="text-[10px] text-zinc-500">{chargesPaidCount}/{data.dueExpenses.length} payées</div>
+                  <div className="text-[10px] text-zinc-600">{chargesPaidCount}/{data.dueExpenses.length} payées</div>
                 </div>
               </div>
               <div className="text-right">
-                <div className="text-[14px] font-bold text-rose-400">−{fmt(data.chargesPaid, { decimals: 0 })} €</div>
-                {chargesUnpaid > 0 && (
-                  <div className="text-[10px] text-zinc-600">{fmt(chargesUnpaid, { decimals: 0 })} € restant</div>
-                )}
+                <div className="text-[14px] font-bold text-zinc-400">−{fmt(data.chargesPaid, { decimals: 0 })} €</div>
+                {chargesUnpaid > 0 && <div className="text-[10px] text-zinc-600">{fmt(chargesUnpaid, { decimals: 0 })} € restant</div>}
               </div>
+            </div>
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <div className="w-7 h-7 rounded-xl bg-zinc-800/80 flex items-center justify-center">
+                  <ShoppingBag className="w-3.5 h-3.5 text-zinc-400" />
+                </div>
+                <div>
+                  <div className="text-[13px] font-medium text-zinc-200">Dépenses</div>
+                  <div className="text-[10px] text-zinc-600">{varData.items.length} opération{varData.items.length !== 1 ? 's' : ''}</div>
+                </div>
+              </div>
+              <div className="text-[14px] font-bold text-zinc-400">−{fmt(varData.total, { decimals: 0 })} €</div>
             </div>
           </div>
         </div>
       </div>
 
       {/* ── DÉCLARATION URSSAF ───────────────────────────────────────────── */}
-      <div className="px-5 mt-3 anim-4">
+      <div className="px-5 mt-2 anim-4">
         <Card className="p-5" onClick={() => setTab('year')}>
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
@@ -616,31 +683,6 @@ const Dashboard = ({ state, year, month, setMonth, openAddTx, setTab }) => {
             <div className="text-right">
               <div className="text-[10px] uppercase tracking-wider text-zinc-600 font-medium mb-0.5">À reverser</div>
               <div className="text-[15px] font-bold text-orange-400">{fmt(qData.ursaffDue, { decimals: 0 })} €</div>
-            </div>
-          </div>
-        </Card>
-      </div>
-
-      {/* ── DÉPENSES DU MOIS ─────────────────────────────────────────────── */}
-      <div className="px-5 mt-2 anim-4">
-        <Card className="p-5" onClick={() => setTab('varexp')}>
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <div className="w-9 h-9 rounded-2xl bg-purple-500/15 flex items-center justify-center flex-shrink-0">
-                <ShoppingBag className="w-4 h-4 text-purple-400" />
-              </div>
-              <div>
-                <div className="text-[11px] uppercase tracking-wider text-zinc-500 font-medium">
-                  {MONTHS_SHORT[month]} · Dépenses
-                </div>
-                <div className="text-[15px] font-bold text-white mt-0.5">
-                  {varData.items.length} dépense{varData.items.length !== 1 ? 's' : ''}
-                </div>
-              </div>
-            </div>
-            <div className="text-right">
-              <div className="text-[10px] uppercase tracking-wider text-zinc-600 font-medium mb-0.5">Total</div>
-              <div className="text-[15px] font-bold text-purple-400">−{fmt(varData.total, { decimals: 0 })} €</div>
             </div>
           </div>
         </Card>
@@ -1037,6 +1079,82 @@ const YearPage = ({ state, year, setMonth, setTab }) => {
             </div>
           ))}
         </Card>
+
+        {/* ── PAR ACTIVITÉ ── */}
+        {state.activities.length > 0 && (() => {
+          const byActivity = {};
+          state.activities.forEach(a => { byActivity[a.id] = 0; });
+          state.transactions.forEach(t => {
+            const d = new Date(t.date);
+            if (d.getFullYear() === year) byActivity[t.activityId] = (byActivity[t.activityId] || 0) + Number(t.amount || 0);
+          });
+          const sorted = [...state.activities].sort((a, b) => (byActivity[b.id] || 0) - (byActivity[a.id] || 0));
+          return (
+            <div className="mt-6">
+              <div className="text-[11px] uppercase tracking-wider font-semibold text-zinc-500 mb-2 px-1">Par activité</div>
+              <Card>
+                {sorted.map((a, i) => {
+                  const total = byActivity[a.id] || 0;
+                  const pct = totals.brut > 0 ? (total / totals.brut) * 100 : 0;
+                  return (
+                    <div key={a.id} className={`p-4 ${i < sorted.length - 1 ? 'border-b border-zinc-800/60' : ''}`}>
+                      <div className="flex items-center justify-between mb-2">
+                        <div className="flex items-center gap-2.5">
+                          <div className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: a.color }} />
+                          <div className="text-[14px] font-medium text-white">{a.name}</div>
+                        </div>
+                        <div className="text-[14px] font-bold text-white">{fmt(total, { decimals: 0 })} €</div>
+                      </div>
+                      <div className="h-1 bg-zinc-800 rounded-full overflow-hidden">
+                        <div className="h-full rounded-full" style={{ width: `${pct}%`, backgroundColor: a.color }} />
+                      </div>
+                    </div>
+                  );
+                })}
+              </Card>
+            </div>
+          );
+        })()}
+
+        {/* ── PAR CLIENT ── */}
+        {(state.clients || []).length > 0 && (() => {
+          const byClient = {};
+          state.transactions.forEach(t => {
+            const d = new Date(t.date);
+            if (d.getFullYear() === year && t.clientId) {
+              byClient[t.clientId] = (byClient[t.clientId] || 0) + Number(t.amount || 0);
+            }
+          });
+          const sorted = Object.entries(byClient).sort((a, b) => b[1] - a[1]);
+          if (sorted.length === 0) return null;
+          return (
+            <div className="mt-6 mb-4">
+              <div className="text-[11px] uppercase tracking-wider font-semibold text-zinc-500 mb-2 px-1">Par client</div>
+              <Card>
+                {sorted.map(([cid, total], i) => {
+                  const client = (state.clients || []).find(c => c.id === cid);
+                  const pct = totals.brut > 0 ? (total / totals.brut) * 100 : 0;
+                  return (
+                    <div key={cid} className={`p-4 ${i < sorted.length - 1 ? 'border-b border-zinc-800/60' : ''}`}>
+                      <div className="flex items-center justify-between mb-2">
+                        <div className="flex items-center gap-2.5">
+                          <div className="w-7 h-7 rounded-full bg-zinc-800 flex items-center justify-center">
+                            <User className="w-3.5 h-3.5 text-zinc-400" />
+                          </div>
+                          <div className="text-[14px] font-medium text-white">{client?.name || 'Client inconnu'}</div>
+                        </div>
+                        <div className="text-[14px] font-bold text-white">{fmt(total, { decimals: 0 })} €</div>
+                      </div>
+                      <div className="h-1 bg-zinc-800 rounded-full overflow-hidden">
+                        <div className="h-full bg-blue-400 rounded-full" style={{ width: `${pct}%` }} />
+                      </div>
+                    </div>
+                  );
+                })}
+              </Card>
+            </div>
+          );
+        })()}
       </div>
     </div>
   );
@@ -1046,7 +1164,7 @@ const YearPage = ({ state, year, setMonth, setTab }) => {
 // Settings page
 // ---------------------------------------------------------------------------
 
-const SettingsPage = ({ state, setState, user, onSignOut }) => {
+const SettingsPage = ({ state, setState, user, onSignOut, onBack }) => {
   const [editActivity, setEditActivity] = useState(null);
   const [editExpense, setEditExpense] = useState(null);
   const [editCategory, setEditCategory] = useState(null);
@@ -1078,7 +1196,11 @@ const SettingsPage = ({ state, setState, user, onSignOut }) => {
 
   return (
     <div className="pb-32">
-      <TopBar subtitle="Paramètres" title="Réglages" />
+      <TopBar subtitle="Paramètres" title="Réglages" right={onBack && (
+        <button onClick={onBack} className="flex items-center gap-1.5 text-[13px] text-zinc-400 active:opacity-60">
+          <ChevronLeft className="w-4 h-4" /> Profil
+        </button>
+      )} />
 
       <div className="px-5">
         <div className="text-[11px] uppercase tracking-wider font-semibold text-zinc-500 mb-2 px-1">Cotisations</div>
@@ -1651,13 +1773,17 @@ const CategoryEditor = ({ category, setState, state, onClose }) => {
 const AddTransactionSheet = ({ open, onClose, state, setState, defaultYear, defaultMonth }) => {
   const [step, setStep] = useState(1);
   const [activityId, setActivityId] = useState(null);
+  const [clientId, setClientId] = useState('');
   const [amount, setAmount] = useState('');
   const [description, setDescription] = useState('');
   const [date, setDate] = useState('');
+  const [newClientName, setNewClientName] = useState('');
+  const [showNewClient, setShowNewClient] = useState(false);
 
   useEffect(() => {
     if (open) {
       setStep(1); setActivityId(null); setAmount(''); setDescription('');
+      setClientId(''); setNewClientName(''); setShowNewClient(false);
       const today = new Date();
       if (today.getFullYear() === defaultYear && today.getMonth() === defaultMonth) {
         setDate(today.toISOString().slice(0, 10));
@@ -1667,16 +1793,27 @@ const AddTransactionSheet = ({ open, onClose, state, setState, defaultYear, defa
     }
   }, [open, defaultYear, defaultMonth]);
 
+  const createAndSelectClient = () => {
+    if (!newClientName.trim()) return;
+    const id = newId();
+    setState(s => ({ ...s, clients: [...(s.clients || []), { id, name: newClientName.trim() }] }));
+    setClientId(id);
+    setNewClientName('');
+    setShowNewClient(false);
+  };
+
   const save = () => {
     const a = parseFloat(amount.replace(',', '.'));
     if (!activityId || isNaN(a) || a <= 0) return;
-    const tx = { id: newId(), activityId, amount: a, description: description.trim(), date };
+    const tx = { id: newId(), activityId, clientId: clientId || null, amount: a, description: description.trim(), date };
     setState(s => ({ ...s, transactions: [...s.transactions, tx] }));
     onClose();
   };
 
   const activity = state.activities.find(a => a.id === activityId);
   const activeActivities = state.activities.filter(a => a.active !== false).sort((a, b) => a.order - b.order);
+  const clients = state.clients || [];
+  const selectedClient = clients.find(c => c.id === clientId);
 
   return (
     <Sheet open={open} onClose={onClose} title="Nouvelle vente">
@@ -1741,6 +1878,49 @@ const AddTransactionSheet = ({ open, onClose, state, setState, defaultYear, defa
               placeholder="Ex. Client TCD Padel"
               className="w-full mt-1.5 bg-[#2C2C2E] rounded-xl px-4 py-3 text-white text-[15px] outline-none"
             />
+          </div>
+
+          <div className="mb-5">
+            <label className="text-[11px] uppercase tracking-wider text-zinc-500 font-medium">Client (optionnel)</label>
+            <div className="flex flex-wrap gap-2 mt-2">
+              <button
+                onClick={() => setClientId('')}
+                className={`px-3 py-1.5 rounded-full text-[12px] font-medium transition-colors ${!clientId ? 'bg-white text-black' : 'bg-[#2C2C2E] text-zinc-400'}`}
+              >
+                Aucun
+              </button>
+              {clients.map(c => (
+                <button
+                  key={c.id}
+                  onClick={() => setClientId(c.id)}
+                  className={`px-3 py-1.5 rounded-full text-[12px] font-medium transition-colors flex items-center gap-1.5 ${clientId === c.id ? 'bg-white text-black' : 'bg-[#2C2C2E] text-zinc-400'}`}
+                >
+                  <User className="w-3 h-3" />{c.name}
+                </button>
+              ))}
+              {showNewClient ? (
+                <div className="flex gap-2 w-full mt-1">
+                  <input
+                    autoFocus
+                    type="text"
+                    value={newClientName}
+                    onChange={e => setNewClientName(e.target.value)}
+                    onKeyDown={e => e.key === 'Enter' && createAndSelectClient()}
+                    placeholder="Nom du client"
+                    className="flex-1 bg-[#2C2C2E] rounded-xl px-3 py-2 text-white text-[13px] outline-none"
+                  />
+                  <button onClick={createAndSelectClient} className="px-3 py-2 bg-emerald-500/20 text-emerald-400 rounded-xl text-[12px] font-medium">OK</button>
+                  <button onClick={() => setShowNewClient(false)} className="px-3 py-2 bg-zinc-800 text-zinc-400 rounded-xl text-[12px]">✕</button>
+                </div>
+              ) : (
+                <button
+                  onClick={() => setShowNewClient(true)}
+                  className="px-3 py-1.5 rounded-full text-[12px] font-medium bg-emerald-500/10 text-emerald-400 flex items-center gap-1"
+                >
+                  <Plus className="w-3 h-3" /> Nouveau
+                </button>
+              )}
+            </div>
           </div>
 
           <div className="mb-5">
@@ -2149,6 +2329,172 @@ const VarExpensesPage = ({ state, setState, year, month, setMonth }) => {
 };
 
 // ---------------------------------------------------------------------------
+// Profile page
+// ---------------------------------------------------------------------------
+
+const ProfilePage = ({ user, state, setState, onSignOut }) => {
+  const [editField, setEditField] = useState(null); // 'username'|'email'|'password'
+  const [fieldValue, setFieldValue] = useState('');
+  const [fieldValue2, setFieldValue2] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [msg, setMsg] = useState(null);
+  const [showSettings, setShowSettings] = useState(false);
+
+  const firstName = user?.user_metadata?.first_name || '';
+  const username = user?.user_metadata?.username || '';
+  const email = user?.email || '';
+  const initial = (firstName || email || '?')[0].toUpperCase();
+
+  const openEdit = (field) => {
+    setEditField(field);
+    setFieldValue(field === 'email' ? email : field === 'username' ? username : '');
+    setFieldValue2('');
+    setMsg(null);
+  };
+
+  const saveField = async () => {
+    setLoading(true);
+    setMsg(null);
+    try {
+      if (editField === 'username') {
+        const { error } = await supabase.auth.updateUser({ data: { username: fieldValue.trim() } });
+        if (error) throw error;
+        setMsg({ type: 'ok', text: 'Pseudo mis à jour.' });
+      } else if (editField === 'email') {
+        const { error } = await supabase.auth.updateUser({ email: fieldValue.trim() });
+        if (error) throw error;
+        setMsg({ type: 'ok', text: 'Email mis à jour. Vérifie ta boîte mail.' });
+      } else if (editField === 'password') {
+        if (fieldValue !== fieldValue2) { setMsg({ type: 'err', text: 'Les mots de passe ne correspondent pas.' }); setLoading(false); return; }
+        if (fieldValue.length < 6) { setMsg({ type: 'err', text: 'Minimum 6 caractères.' }); setLoading(false); return; }
+        const { error } = await supabase.auth.updateUser({ password: fieldValue });
+        if (error) throw error;
+        setMsg({ type: 'ok', text: 'Mot de passe mis à jour.' });
+      }
+      setEditField(null);
+    } catch (e) {
+      setMsg({ type: 'err', text: e.message || 'Erreur.' });
+    }
+    setLoading(false);
+  };
+
+  if (showSettings) {
+    return <SettingsPage state={state} setState={setState} user={user} onSignOut={onSignOut} onBack={() => setShowSettings(false)} />;
+  }
+
+  return (
+    <div className="pb-32">
+      <TopBar subtitle="Mon espace" title="Profil" />
+
+      <div className="px-5">
+        {/* Avatar */}
+        <div className="flex flex-col items-center py-6">
+          <div className="w-24 h-24 rounded-full bg-gradient-to-br from-emerald-500 to-emerald-700 flex items-center justify-center mb-4 shadow-xl shadow-emerald-900/30">
+            <span className="text-white text-[42px] font-bold">{initial}</span>
+          </div>
+          <div className="text-[20px] font-bold text-white">{firstName || 'Mon compte'}</div>
+          {username && <div className="text-[14px] text-zinc-500 mt-1">@{username}</div>}
+          <div className="text-[13px] text-zinc-600 mt-0.5">{email}</div>
+        </div>
+
+        {msg && (
+          <div className={`mb-4 px-4 py-3 rounded-xl text-[13px] font-medium ${msg.type === 'ok' ? 'bg-emerald-500/15 text-emerald-400' : 'bg-rose-500/15 text-rose-400'}`}>
+            {msg.text}
+          </div>
+        )}
+
+        <div className="text-[11px] uppercase tracking-wider font-semibold text-zinc-500 mb-2 px-1">Informations</div>
+        <Card className="mb-5">
+          <button onClick={() => openEdit('username')} className="w-full flex items-center justify-between p-4 border-b border-zinc-800/60 active:bg-[#252527]">
+            <div className="flex items-center gap-3">
+              <User className="w-4 h-4 text-zinc-500" />
+              <div className="text-left">
+                <div className="text-[11px] text-zinc-600 uppercase tracking-wider">Pseudo</div>
+                <div className="text-[14px] font-medium text-white mt-0.5">{username || '—'}</div>
+              </div>
+            </div>
+            <Edit3 className="w-4 h-4 text-zinc-600" />
+          </button>
+          <button onClick={() => openEdit('email')} className="w-full flex items-center justify-between p-4 border-b border-zinc-800/60 active:bg-[#252527]">
+            <div className="flex items-center gap-3">
+              <Mail className="w-4 h-4 text-zinc-500" />
+              <div className="text-left">
+                <div className="text-[11px] text-zinc-600 uppercase tracking-wider">Email</div>
+                <div className="text-[14px] font-medium text-white mt-0.5">{email}</div>
+              </div>
+            </div>
+            <Edit3 className="w-4 h-4 text-zinc-600" />
+          </button>
+          <button onClick={() => openEdit('password')} className="w-full flex items-center justify-between p-4 active:bg-[#252527]">
+            <div className="flex items-center gap-3">
+              <Lock className="w-4 h-4 text-zinc-500" />
+              <div className="text-left">
+                <div className="text-[11px] text-zinc-600 uppercase tracking-wider">Mot de passe</div>
+                <div className="text-[14px] font-medium text-zinc-400 mt-0.5">••••••••</div>
+              </div>
+            </div>
+            <Edit3 className="w-4 h-4 text-zinc-600" />
+          </button>
+        </Card>
+
+        <div className="text-[11px] uppercase tracking-wider font-semibold text-zinc-500 mb-2 px-1">Application</div>
+        <Card className="mb-5">
+          <button onClick={() => setShowSettings(true)} className="w-full flex items-center justify-between p-4 border-b border-zinc-800/60 active:bg-[#252527]">
+            <div className="flex items-center gap-3">
+              <Sliders className="w-4 h-4 text-zinc-500" />
+              <span className="text-[14px] font-medium text-white">Réglages</span>
+            </div>
+            <ChevronRight className="w-4 h-4 text-zinc-600" />
+          </button>
+          <button onClick={onSignOut} className="w-full flex items-center justify-between p-4 active:bg-[#252527]">
+            <span className="text-[14px] font-medium text-rose-400">Se déconnecter</span>
+            <ChevronRight className="w-4 h-4 text-zinc-600" />
+          </button>
+        </Card>
+      </div>
+
+      {/* Edit sheet */}
+      <Sheet
+        open={!!editField}
+        onClose={() => setEditField(null)}
+        title={editField === 'username' ? 'Modifier le pseudo' : editField === 'email' ? 'Modifier l\'email' : 'Modifier le mot de passe'}
+      >
+        <div className="space-y-4">
+          {editField === 'password' ? (
+            <>
+              <div>
+                <label className="text-[11px] uppercase tracking-wider text-zinc-500 font-medium">Nouveau mot de passe</label>
+                <input type="password" value={fieldValue} onChange={e => setFieldValue(e.target.value)}
+                  className="w-full mt-1.5 bg-[#2C2C2E] rounded-xl px-4 py-3 text-white text-[15px] outline-none" />
+              </div>
+              <div>
+                <label className="text-[11px] uppercase tracking-wider text-zinc-500 font-medium">Confirmer</label>
+                <input type="password" value={fieldValue2} onChange={e => setFieldValue2(e.target.value)}
+                  className="w-full mt-1.5 bg-[#2C2C2E] rounded-xl px-4 py-3 text-white text-[15px] outline-none" />
+              </div>
+            </>
+          ) : (
+            <div>
+              <label className="text-[11px] uppercase tracking-wider text-zinc-500 font-medium">
+                {editField === 'username' ? 'Pseudo' : 'Email'}
+              </label>
+              <input autoFocus type={editField === 'email' ? 'email' : 'text'} value={fieldValue}
+                onChange={e => setFieldValue(e.target.value)}
+                className="w-full mt-1.5 bg-[#2C2C2E] rounded-xl px-4 py-3 text-white text-[15px] outline-none" />
+            </div>
+          )}
+          {msg && <div className={`px-4 py-3 rounded-xl text-[13px] ${msg.type === 'ok' ? 'bg-emerald-500/15 text-emerald-400' : 'bg-rose-500/15 text-rose-400'}`}>{msg.text}</div>}
+          <button onClick={saveField} disabled={loading}
+            className="w-full bg-white text-black font-semibold py-3.5 rounded-xl active:scale-[0.98] disabled:opacity-50">
+            {loading ? 'Enregistrement…' : 'Enregistrer'}
+          </button>
+        </div>
+      </Sheet>
+    </div>
+  );
+};
+
+// ---------------------------------------------------------------------------
 // Auth gate
 // ---------------------------------------------------------------------------
 
@@ -2204,7 +2550,7 @@ const TabBar = ({ tab, setTab }) => {
     { id: 'expenses',   label: 'Charges',   icon: Receipt },
     { id: 'varexp',     label: 'Dépenses',  icon: ShoppingBag },
     { id: 'year',       label: 'Année',     icon: BarChart3 },
-    { id: 'settings',   label: 'Réglages',  icon: Sliders },
+    { id: 'profile',    label: 'Profil',    icon: User },
   ];
 
   return (
@@ -2240,6 +2586,7 @@ export default function App() {
   const [year, setYearState] = useState(TODAY_YEAR);
   const [month, setMonthState] = useState(TODAY_MONTH);
   const [addOpen, setAddOpen] = useState(false);
+  const [addVarOpen, setAddVarOpen] = useState(false);
 
   const setMonth = (y, m) => { setYearState(y); setMonthState(m); };
 
@@ -2282,11 +2629,12 @@ export default function App() {
 
       <div className="max-w-md mx-auto min-h-screen">
         <div className="pt-2">
-          {tab === 'dashboard' && <Dashboard state={state} year={year} month={month} setMonth={setMonth} openAddTx={() => setAddOpen(true)} setTab={setTab} />}
+          {tab === 'dashboard' && <Dashboard state={state} year={year} month={month} setMonth={setMonth} openAddTx={() => setAddOpen(true)} openAddVar={() => setAddVarOpen(true)} setTab={setTab} user={user} />}
           {tab === 'revenue'   && <RevenuePage state={state} setState={setState} year={year} month={month} setMonth={setMonth} openAddTx={() => setAddOpen(true)} />}
           {tab === 'expenses'  && <ExpensesPage state={state} setState={setState} year={year} month={month} setMonth={setMonth} />}
           {tab === 'varexp'    && <VarExpensesPage state={state} setState={setState} year={year} month={month} setMonth={setMonth} />}
           {tab === 'year'      && <YearPage state={state} year={year} setMonth={setMonth} setTab={setTab} />}
+          {tab === 'profile'   && <ProfilePage user={user} state={state} setState={setState} onSignOut={signOut} />}
           {tab === 'settings'  && <SettingsPage state={state} setState={setState} user={user} onSignOut={signOut} />}
         </div>
       </div>
@@ -2298,6 +2646,14 @@ export default function App() {
         onClose={() => setAddOpen(false)}
         state={state}
         setState={setState}
+        defaultYear={year}
+        defaultMonth={month}
+      />
+      <VarExpenseEditor
+        expense={addVarOpen ? { id: 'new' } : null}
+        state={state}
+        setState={setState}
+        onClose={() => setAddVarOpen(false)}
         defaultYear={year}
         defaultMonth={month}
       />
