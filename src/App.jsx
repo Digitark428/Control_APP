@@ -11,49 +11,11 @@ import { Plus, ChevronLeft, ChevronRight, X, Trash2, Wallet, Edit3, Check, Home,
 const MONTHS_FR = ['Janvier', 'Février', 'Mars', 'Avril', 'Mai', 'Juin', 'Juillet', 'Août', 'Septembre', 'Octobre', 'Novembre', 'Décembre'];
 const MONTHS_SHORT = ['Jan', 'Fév', 'Mar', 'Avr', 'Mai', 'Juin', 'Juil', 'Août', 'Sep', 'Oct', 'Nov', 'Déc'];
 
-const DEFAULT_ACTIVITIES = [
-  { id: 'uber',     name: 'Uber Eats',                  color: '#00D26A', taxable: true,  active: true, order: 1 },
-  { id: 'booth',    name: 'Le Petit Booth',             color: '#FF9F0A', taxable: true,  active: true, order: 2 },
-  { id: 'digitark', name: 'DIGITARK',                   color: '#5E5CE6', taxable: true,  active: true, order: 3 },
-  { id: 'mariee',   name: 'La Petite Mariée',           color: '#FF375F', taxable: true,  active: true, order: 4 },
-  { id: 'autres',   name: 'Autres (non soumis URSSAF)', color: '#8E8E93', taxable: false, active: true, order: 5 },
-];
-
-const DEFAULT_CATEGORIES = [
-  { id: 'logement',    name: 'Logement',    color: '#0A84FF', order: 1 },
-  { id: 'abos',        name: 'Abonnements', color: '#BF5AF2', order: 2 },
-  { id: 'famille',     name: 'Famille',     color: '#FF375F', order: 3 },
-  { id: 'sante',       name: 'Santé',       color: '#30D158', order: 4 },
-  { id: 'transport',   name: 'Transport',   color: '#FF9F0A', order: 5 },
-  { id: 'outils',      name: 'Outils pro',  color: '#64D2FF', order: 6 },
-];
-
-const DEFAULT_EXPENSES = [
-  { id: 'netflix',  name: 'Netflix',              categoryId: 'abos',      amount: 10,    frequency: 'monthly',   dueDay: 15 },
-  { id: 'credit',   name: 'Crédit maman',         categoryId: 'famille',   amount: 150,   frequency: 'monthly',   dueDay: 13 },
-  { id: 'capcut',   name: 'CapCut',               categoryId: 'outils',    amount: 9,     frequency: 'monthly',   dueDay: 1  },
-  { id: 'chatgpt',  name: 'ChatGPT',              categoryId: 'outils',    amount: 9,     frequency: 'monthly',   dueDay: 15 },
-  { id: 'crossfit', name: 'Crossfit',             categoryId: 'sante',     amount: 90,    frequency: 'monthly',   dueDay: 10 },
-  { id: 'edf',      name: 'EDF',                  categoryId: 'logement',  amount: 80,    frequency: 'bimonthly', dueDay: 2,  startMonth: 1 },
-  { id: 'assmaison',name: 'Assurance maison',     categoryId: 'logement',  amount: 13.65, frequency: 'monthly',   dueDay: 10 },
-  { id: 'internet', name: 'Internet + TV + Tél.', categoryId: 'logement',  amount: 54,    frequency: 'monthly',   dueDay: 10 },
-  { id: 'eau',      name: 'Eau',                  categoryId: 'logement',  amount: 30,    frequency: 'bimonthly', dueDay: 10, startMonth: 0 },
-  { id: 'assvoit',  name: 'Assurance voiture',    categoryId: 'transport', amount: 41,    frequency: 'annual',    dueDay: 1,  dueMonth: 4 },
-  { id: 'loyer',    name: 'Loyer',                categoryId: 'logement',  amount: 860,   frequency: 'monthly',   dueDay: 5  },
-];
-
+const DEFAULT_ACTIVITIES = [];
+const DEFAULT_CATEGORIES = [];
+const DEFAULT_EXPENSES = [];
 const SEED_TRANSACTIONS = [];
-
-const DEFAULT_VAR_CATEGORIES = [
-  { id: 'essence',    name: 'Essence',       color: '#FF9F0A', order: 1 },
-  { id: 'boissons',   name: 'Boissons',      color: '#0A84FF', order: 2 },
-  { id: 'encas',      name: 'Encas',         color: '#30D158', order: 3 },
-  { id: 'parking',    name: 'Parking',       color: '#64D2FF', order: 4 },
-  { id: 'depro',      name: 'Dépenses pro',  color: '#5E5CE6', order: 5 },
-  { id: 'courses',    name: 'Courses',       color: '#FF375F', order: 6 },
-  { id: 'resto',      name: 'Restaurants',   color: '#BF5AF2', order: 7 },
-  { id: 'loisirs',    name: 'Loisirs',       color: '#FFD60A', order: 8 },
-];
+const DEFAULT_VAR_CATEGORIES = [];
 
 const STORAGE_KEY = 'finapp_state_v2';
 const LEGACY_KEY = 'finapp_state_v1';
@@ -1249,13 +1211,10 @@ const SettingsPage = ({ state, setState, user, onSignOut }) => {
               <ChevronRight className="w-4 h-4 text-zinc-600" />
             </button>
             <button
-              onClick={() => {
+              onClick={async () => {
                 if (window.confirm('Supprimer définitivement ton compte et toutes tes données ? Cette action est irréversible.')) {
-                  import('./lib/supabase').then(({ supabase }) => {
-                    supabase.from('app_state').delete().then(() => {
-                      supabase.auth.signOut();
-                    });
-                  });
+                  await supabase.from('app_state').delete().eq('user_id', user.id);
+                  await supabase.auth.signOut();
                 }
               }}
               className="w-full flex items-center justify-between p-4 active:bg-[#252527] cursor-pointer"
