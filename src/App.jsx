@@ -15,7 +15,16 @@ const DEFAULT_ACTIVITIES = [];
 const DEFAULT_CATEGORIES = [];
 const DEFAULT_EXPENSES = [];
 const SEED_TRANSACTIONS = [];
-const DEFAULT_VAR_CATEGORIES = [];
+const DEFAULT_VAR_CATEGORIES = [
+  { id: 'essence',    name: 'Essence',      color: '#FF9F0A', order: 1 },
+  { id: 'boissons',   name: 'Boissons',     color: '#30D158', order: 2 },
+  { id: 'encas',      name: 'Encas',        color: '#FF6B35', order: 3 },
+  { id: 'parking',    name: 'Parking',      color: '#636366', order: 4 },
+  { id: 'depropro',   name: 'Dépenses pro', color: '#5E5CE6', order: 5 },
+  { id: 'courses',    name: 'Courses',      color: '#34C759', order: 6 },
+  { id: 'restaurants',name: 'Restaurants',  color: '#FF453A', order: 7 },
+  { id: 'loisirs',    name: 'Loisirs',      color: '#BF5AF2', order: 8 },
+];
 
 const STORAGE_KEY = 'finapp_state_v2';
 const LEGACY_KEY = 'finapp_state_v1';
@@ -78,7 +87,7 @@ const DEFAULT_STATE = {
   varCategories: DEFAULT_VAR_CATEGORIES,
   varExpenses: [],
   settings: {
-    ursaffRate: 0.18,
+    ursaffRate: 0,
     weeklyUberObjective: 460,
     declarationFrequency: 'quarterly',
     notificationsEnabled: true,
@@ -109,7 +118,7 @@ const migrateState = (legacy) => {
     varCategories: legacy.varCategories || DEFAULT_VAR_CATEGORIES,
     varExpenses: legacy.varExpenses || [],
     settings: {
-      ursaffRate: legacy.settings?.ursaffRate ?? 0.18,
+      ursaffRate: legacy.settings?.ursaffRate ?? 0,
       weeklyUberObjective: legacy.settings?.weeklyUberObjective ?? 460,
       declarationFrequency: 'quarterly',
       notificationsEnabled: true,
@@ -787,6 +796,7 @@ const RevenuePage = ({ state, setState, year, month, setMonth, openAddTx }) => {
 // ---------------------------------------------------------------------------
 
 const ExpensesPage = ({ state, setState, year, month, setMonth }) => {
+  const [addExpense, setAddExpense] = useState(null);
   const data = useMemo(() => computeMonth(state, year, month), [state, year, month]);
   const catMap = useMemo(() => {
     const m = {};
@@ -828,6 +838,12 @@ const ExpensesPage = ({ state, setState, year, month, setMonth }) => {
       />
 
       <div className="px-5">
+        <button
+          onClick={() => setAddExpense({ id: 'new', name: '', amount: 0, frequency: 'monthly', dueDay: 1, categoryId: state.categories[0]?.id || '' })}
+          className="w-full mb-5 bg-white text-black font-semibold py-3.5 rounded-xl flex items-center justify-center gap-2 active:scale-[0.98] transition-transform"
+        >
+          <Plus className="w-4 h-4" /> Créer une charge
+        </button>
         <Card className="p-5 mb-5">
           <div className="flex items-end justify-between mb-3">
             <div>
@@ -890,10 +906,17 @@ const ExpensesPage = ({ state, setState, year, month, setMonth }) => {
         {data.dueExpenses.length === 0 && (
           <div className="text-center py-12 text-zinc-500 text-sm">
             Aucune charge ce mois-ci.<br />
-            Ajoute-en depuis Réglages.
+            Crée-en une avec le bouton ci-dessus.
           </div>
         )}
       </div>
+
+      <ExpenseEditor
+        expense={addExpense}
+        state={state}
+        setState={setState}
+        onClose={() => setAddExpense(null)}
+      />
     </div>
   );
 };
@@ -1037,7 +1060,7 @@ const SettingsPage = ({ state, setState, user, onSignOut }) => {
           <div className="flex items-center justify-between p-4 border-b border-zinc-800/60">
             <div>
               <div className="text-[14px] font-medium text-white">Taux URSSAF</div>
-              <div className="text-[11px] text-zinc-500 mt-0.5">Appliqué aux revenus déclarés</div>
+              <div className="text-[11px] text-zinc-500 mt-0.5">Appliqué aux revenus déclarés · 0% = désactivé</div>
             </div>
             <div className="flex items-center gap-1 bg-zinc-800 rounded-lg px-3 py-1.5">
               <input
@@ -1974,16 +1997,36 @@ const VarExpensesPage = ({ state, setState, year, month, setMonth }) => {
           </div>
         )}
 
+        {sortedCats.length === 0 && (
+          <div className="text-center py-4">
+            <p className="text-zinc-500 text-sm mb-3">Aucune catégorie.</p>
+            <button
+              onClick={() => setEditCat({ id: 'new', name: '', color: '#5E5CE6', order: 1 })}
+              className="px-4 py-2 bg-emerald-400/15 text-emerald-400 rounded-full text-[13px] font-medium"
+            >
+              <Plus className="w-3.5 h-3.5 inline mr-1" />Créer ma première catégorie
+            </button>
+          </div>
+        )}
+
         {/* Category management */}
         <div className="mt-6">
           <div className="flex items-center justify-between mb-2 px-1">
             <div className="text-[11px] uppercase tracking-wider font-semibold text-zinc-500">Catégories</div>
-            <button
-              onClick={() => setShowCatEditor(v => !v)}
-              className="text-[12px] text-emerald-400 font-medium"
-            >
-              {showCatEditor ? 'Fermer' : 'Gérer'}
-            </button>
+            <div className="flex items-center gap-3">
+              <button
+                onClick={() => setEditCat({ id: 'new', name: '', color: '#5E5CE6', order: sortedCats.length + 1 })}
+                className="flex items-center gap-1 text-[12px] text-emerald-400 font-medium"
+              >
+                <Plus className="w-3.5 h-3.5" /> Créer
+              </button>
+              <button
+                onClick={() => setShowCatEditor(v => !v)}
+                className="text-[12px] text-zinc-500 font-medium"
+              >
+                {showCatEditor ? 'Fermer' : 'Gérer'}
+              </button>
+            </div>
           </div>
           {showCatEditor && (
             <Card className="mb-5">
@@ -2083,7 +2126,7 @@ const TabBar = ({ tab, setTab }) => {
     { id: 'dashboard',  label: 'Accueil',   icon: Home },
     { id: 'revenue',    label: 'Revenus',   icon: Wallet },
     { id: 'expenses',   label: 'Charges',   icon: Receipt },
-    { id: 'varexp',     label: 'Variables', icon: ShoppingBag },
+    { id: 'varexp',     label: 'Dépenses',  icon: ShoppingBag },
     { id: 'year',       label: 'Année',     icon: BarChart3 },
     { id: 'settings',   label: 'Réglages',  icon: Sliders },
   ];
