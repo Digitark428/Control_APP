@@ -1,0 +1,25 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+* {
+  -webkit-tap-highlight-color: transparent;
+  -webkit-touch-callout: none;
+}
+
+body {
+  background: #000;
+  overscroll-behavior: none;
+  -webkit-overflow-scrolling: touch;
+  cursor: pointer;
+}
+
+button, a, [role="button"] {
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+input[type="date"]::-webkit-calendar-picker-indicator {
+  filter: invert(1);
+  opacity: 0.5;
+}
