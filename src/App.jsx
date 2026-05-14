@@ -42,11 +42,7 @@ const DEFAULT_EXPENSES = [
   { id: 'loyer',    name: 'Loyer',                categoryId: 'logement',  amount: 860,   frequency: 'monthly',   dueDay: 5  },
 ];
 
-const SEED_TRANSACTIONS = [
-  { id: 't1', activityId: 'digitark', date: '2026-05-15', description: 'C.TCD PADEL AVRIL',          amount: 490 },
-  { id: 't2', activityId: 'digitark', date: '2026-05-20', description: 'C.AUTOSUD AVRIL',            amount: 490 },
-  { id: 't3', activityId: 'booth',    date: '2026-05-10', description: '6 Juin ETM métallique Solde', amount: 383.50 },
-];
+const SEED_TRANSACTIONS = [];
 
 const DEFAULT_VAR_CATEGORIES = [
   { id: 'essence',    name: 'Essence',       color: '#FF9F0A', order: 1 },
@@ -188,6 +184,10 @@ const useAppState = (user) => {
     }
 
     setSynced(false);
+    // Nettoie le localStorage avant de charger — évite de contaminer un nouveau compte
+    try { localStorage.removeItem(STORAGE_KEY); } catch {}
+    setState(DEFAULT_STATE);
+
     loadState().then(remote => {
       if (remote) {
         setState(remote);
@@ -1243,10 +1243,25 @@ const SettingsPage = ({ state, setState, user, onSignOut }) => {
             </div>
             <button
               onClick={onSignOut}
-              className="w-full flex items-center justify-between p-4 active:bg-[#252527] cursor-pointer"
+              className="w-full flex items-center justify-between p-4 border-b border-zinc-800/60 active:bg-[#252527] cursor-pointer"
             >
               <span className="text-[14px] font-medium text-rose-400">Se déconnecter</span>
               <ChevronRight className="w-4 h-4 text-zinc-600" />
+            </button>
+            <button
+              onClick={() => {
+                if (window.confirm('Supprimer définitivement ton compte et toutes tes données ? Cette action est irréversible.')) {
+                  import('./lib/supabase').then(({ supabase }) => {
+                    supabase.from('app_state').delete().then(() => {
+                      supabase.auth.signOut();
+                    });
+                  });
+                }
+              }}
+              className="w-full flex items-center justify-between p-4 active:bg-[#252527] cursor-pointer"
+            >
+              <span className="text-[14px] font-medium text-zinc-500">Supprimer mon compte</span>
+              <ChevronRight className="w-4 h-4 text-zinc-700" />
             </button>
           </Card>
         </div>
