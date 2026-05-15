@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { loadState, saveState } from './lib/db';
 import { supabase } from './lib/supabase';
 import AuthScreen from './components/AuthScreen';
+import SplashScreen from './components/SplashScreen';
 import { Plus, ChevronLeft, ChevronRight, X, Trash2, Wallet, Edit3, Check, Home, BarChart3, Receipt, Sliders, AlertCircle, Power, Bell, Clock, FileText, EyeOff, ShoppingBag, User, TrendingUp, Users, Camera, Lock, Mail } from 'lucide-react';
 
 // ---------------------------------------------------------------------------
@@ -351,7 +352,7 @@ const Avatar = ({ src, initial = '?', size = 40, onClick, ring = false }) => {
 };
 
 const TopBar = ({ title, subtitle, right }) => (
-  <div className="flex items-end justify-between px-5 pt-4 pb-4">
+  <div className="flex items-end justify-between px-5 pt-8 pb-4">
     <div>
       {subtitle && <div className="text-[11px] text-zinc-500 font-semibold tracking-[0.12em] uppercase mb-1.5">{subtitle}</div>}
       <h1 className="text-[28px] font-bold text-white leading-tight" style={{ letterSpacing: '-0.7px' }}>{title}</h1>
@@ -496,18 +497,18 @@ const Dashboard = ({ state, year, month, setMonth, openAddTx, openAddVar, setTab
   const argentVrai = benefice - data.chargesPaid - varData.total;
   const chargesUnpaid = data.charges - data.chargesPaid;
   const chargesPaidCount = data.dueExpenses.filter(e => e.paid).length;
-  const userFirstName = user?.user_metadata?.first_name || user?.user_metadata?.username || 'toi';
+  const userFirstName = user?.user_metadata?.username || user?.user_metadata?.first_name || 'toi';
 
   return (
     <div className="pb-32">
 
       {/* ── WELCOME HEADER ───────────────────────────────────────────────── */}
-      <div className="px-5 pt-5 pb-3 flex items-center justify-between anim-1">
+      <div className="px-5 pt-8 pb-3 flex items-center justify-between anim-1">
         <div className="flex items-center gap-3 min-w-0">
           <Avatar
             src={state.profile?.avatar}
-            initial={(user?.user_metadata?.first_name || user?.email || '?')[0].toUpperCase()}
-            size={48}
+            initial={(user?.user_metadata?.username || user?.user_metadata?.first_name || user?.email || '?')[0].toUpperCase()}
+            size={56}
             ring
             onClick={() => setTab('profile')}
           />
@@ -1089,6 +1090,25 @@ const YearPage = ({ state, year, setMonth, setTab }) => {
     return [1, 2, 3, 4].map(q => ({ q, ...computeQuarter(state, year, q) }));
   }, [state, year]);
 
+  // Dépenses variables — agrégat annuel
+  const varYear = useMemo(() => {
+    const items = (state.varExpenses || []).filter(e => new Date(e.date).getFullYear() === year);
+    const total = items.reduce((s, e) => s + Number(e.amount || 0), 0);
+    const byCat = {};
+    items.forEach(e => {
+      const cid = e.categoryId || 'autre';
+      if (!byCat[cid]) byCat[cid] = { total: 0, count: 0 };
+      byCat[cid].total += Number(e.amount || 0);
+      byCat[cid].count += 1;
+    });
+    const catMap = {};
+    (state.varCategories || []).forEach(c => { catMap[c.id] = c; });
+    const top = Object.entries(byCat)
+      .map(([cid, v]) => ({ cid, cat: catMap[cid], total: v.total, count: v.count }))
+      .sort((a, b) => b.total - a.total);
+    return { total, count: items.length, top };
+  }, [state.varExpenses, state.varCategories, year]);
+
   return (
     <div className="pb-32">
       <TopBar subtitle={year.toString()} title="Année" />
@@ -1132,6 +1152,61 @@ const YearPage = ({ state, year, setMonth, setTab }) => {
             </Card>
           ))}
         </div>
+
+        <div className="text-[11px] uppercase tracking-wider font-semibold text-zinc-500 mb-2 px-1">Dépenses annuelles</div>
+        <Card className="p-5 mb-5">
+          <div className="flex items-end justify-between mb-4">
+            <div>
+              <div className="text-[11px] uppercase tracking-[0.12em] text-zinc-500 font-semibold mb-1.5">Total {year}</div>
+              <div className="flex items-baseline gap-1.5">
+                <span className="text-[32px] font-bold text-rose-400 leading-none" style={{ letterSpacing: '-0.8px' }}>
+                  −{fmt(varYear.total, { decimals: 0 })}
+                </span>
+                <span className="text-[18px] text-rose-400/60 font-medium">€</span>
+              </div>
+            </div>
+            <div className="text-right">
+              <div className="text-[11px] text-zinc-500">{varYear.count} dépense{varYear.count !== 1 ? 's' : ''}</div>
+              <div className="text-[13px] font-semibold text-zinc-400 mt-0.5">{varYear.top.length} catégorie{varYear.top.length !== 1 ? 's' : ''}</div>
+            </div>
+          </div>
+
+          {varYear.top.length > 0 ? (
+            <>
+              <div className="text-[11px] uppercase tracking-[0.12em] text-zinc-600 font-semibold mb-3">Top catégories</div>
+              <div className="space-y-3">
+                {varYear.top.slice(0, 5).map(({ cid, cat, total, count }) => {
+                  const pct = varYear.total > 0 ? (total / varYear.total) * 100 : 0;
+                  return (
+                    <div key={cid}>
+                      <div className="flex items-center justify-between mb-1.5">
+                        <div className="flex items-center gap-2 min-w-0">
+                          <div className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: cat?.color || '#8E8E93' }} />
+                          <span className="text-[13.5px] font-semibold text-white truncate" style={{ letterSpacing: '-0.1px' }}>
+                            {cat?.name || 'Autre'}
+                          </span>
+                          <span className="text-[11px] text-zinc-600 flex-shrink-0">{count}</span>
+                        </div>
+                        <div className="flex items-baseline gap-1.5 flex-shrink-0">
+                          <span className="text-[13.5px] font-semibold text-white">{fmt(total, { decimals: 0 })} €</span>
+                          <span className="text-[11px] text-zinc-500 tabular-nums">{pct.toFixed(0)}%</span>
+                        </div>
+                      </div>
+                      <div className="h-1.5 rounded-full overflow-hidden" style={{ background: 'rgba(255,255,255,0.05)' }}>
+                        <div
+                          className="h-full rounded-full transition-all duration-500"
+                          style={{ width: `${pct}%`, backgroundColor: cat?.color || '#8E8E93' }}
+                        />
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </>
+          ) : (
+            <div className="text-[13px] text-zinc-600 text-center py-2">Aucune dépense variable cette année.</div>
+          )}
+        </Card>
 
         <div className="text-[11px] uppercase tracking-wider font-semibold text-zinc-500 mb-2 px-1">Détail mensuel</div>
         <Card>
@@ -2250,15 +2325,18 @@ const VarExpensesPage = ({ state, setState, year, month, setMonth }) => {
 
       <div className="px-5">
         {/* Summary card */}
-        <Card className="p-5 mb-5">
+        <Card className="p-5 mb-4">
           <div className="flex items-end justify-between mb-3">
             <div>
-              <div className="text-[11px] uppercase tracking-wider text-zinc-500 font-medium mb-1">Total du mois</div>
-              <div className="text-3xl font-bold text-white">{fmt(data.total, { decimals: 2 })} €</div>
+              <div className="text-[11px] uppercase tracking-[0.12em] text-zinc-500 font-semibold mb-1.5">Total du mois</div>
+              <div className="flex items-baseline gap-1.5">
+                <span className="text-[36px] font-bold text-white leading-none" style={{ letterSpacing: '-1px' }}>{fmt(data.total, { decimals: 2 })}</span>
+                <span className="text-[20px] text-zinc-500 font-medium">€</span>
+              </div>
             </div>
             <div className="text-right">
               <div className="text-[11px] text-zinc-500 mb-1">{data.items.length} dépense{data.items.length !== 1 ? 's' : ''}</div>
-              <div className="text-base font-semibold text-zinc-400">{sortedCatIds.length} catégorie{sortedCatIds.length !== 1 ? 's' : ''}</div>
+              <div className="text-[13px] font-semibold text-zinc-400">{sortedCatIds.length} catégorie{sortedCatIds.length !== 1 ? 's' : ''}</div>
             </div>
           </div>
           {sortedCatIds.length > 0 && (
@@ -2278,6 +2356,52 @@ const VarExpensesPage = ({ state, setState, year, month, setMonth }) => {
             </div>
           )}
         </Card>
+
+        {/* Breakdown by category — barres horizontales détaillées */}
+        {sortedCatIds.length > 0 && (
+          <Card className="p-5 mb-4">
+            <div className="flex items-center justify-between mb-4">
+              <div className="text-[11px] uppercase tracking-[0.12em] text-zinc-500 font-semibold">Répartition</div>
+              <div className="text-[11px] text-zinc-600">par catégorie</div>
+            </div>
+            <div className="space-y-3">
+              {[...sortedCatIds]
+                .map(cid => ({
+                  cid,
+                  cat: catMap[cid],
+                  total: (byCategory[cid] || []).reduce((s, e) => s + e.amount, 0),
+                  count: (byCategory[cid] || []).length,
+                }))
+                .sort((a, b) => b.total - a.total)
+                .map(({ cid, cat, total, count }) => {
+                  const pct = data.total > 0 ? (total / data.total) * 100 : 0;
+                  return (
+                    <div key={cid}>
+                      <div className="flex items-center justify-between mb-1.5">
+                        <div className="flex items-center gap-2 min-w-0">
+                          <div className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: cat?.color || '#8E8E93' }} />
+                          <span className="text-[13.5px] font-semibold text-white truncate" style={{ letterSpacing: '-0.1px' }}>
+                            {cat?.name || 'Autre'}
+                          </span>
+                          <span className="text-[11px] text-zinc-600 flex-shrink-0">{count}</span>
+                        </div>
+                        <div className="flex items-baseline gap-1.5 flex-shrink-0">
+                          <span className="text-[13.5px] font-semibold text-white">{fmt(total, { decimals: 0 })} €</span>
+                          <span className="text-[11px] text-zinc-500 tabular-nums">{pct.toFixed(0)}%</span>
+                        </div>
+                      </div>
+                      <div className="h-1.5 rounded-full overflow-hidden" style={{ background: 'rgba(255,255,255,0.05)' }}>
+                        <div
+                          className="h-full rounded-full transition-all duration-500"
+                          style={{ width: `${pct}%`, backgroundColor: cat?.color || '#8E8E93' }}
+                        />
+                      </div>
+                    </div>
+                  );
+                })}
+            </div>
+          </Card>
+        )}
 
         {/* Add button */}
         <button
@@ -2775,8 +2899,22 @@ export default function App() {
   const [month, setMonthState] = useState(TODAY_MONTH);
   const [addOpen, setAddOpen] = useState(false);
   const [addVarOpen, setAddVarOpen] = useState(false);
+  const [splashDone, setSplashDone] = useState(false);
+  const prevUserRef = useRef(null);
 
   const setMonth = (y, m) => { setYearState(y); setMonthState(m); };
+
+  // Force le retour au dashboard à chaque connexion / inscription réussie
+  useEffect(() => {
+    const prev = prevUserRef.current;
+    if (!prev && user) setTab('dashboard');
+    prevUserRef.current = user ?? null;
+  }, [user]);
+
+  // Splash screen : affiché à l'ouverture, indépendamment de l'auth
+  if (!splashDone) {
+    return <SplashScreen onDone={() => setSplashDone(true)} />;
+  }
 
   // Loading screen
   if (user === undefined) {

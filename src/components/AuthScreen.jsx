@@ -249,6 +249,7 @@ const Logo = ({ size = 96 }) => (
     alignItems: 'center',
     justifyContent: 'center',
   }}>
+    {/* Halo ambient */}
     <div style={{
       position: 'absolute',
       inset: -20,
@@ -256,20 +257,43 @@ const Logo = ({ size = 96 }) => (
       filter: 'blur(12px)',
       pointerEvents: 'none',
     }} />
-    <img
-      src="/logo.png"
-      alt="Control."
-      width={size}
-      height={size}
-      style={{
-        width: size,
-        height: size,
-        borderRadius: size * 0.235,
-        position: 'relative',
-        boxShadow: '0 20px 60px -10px rgba(0,0,0,0.8), 0 0 0 1px rgba(255,255,255,0.04)',
-        objectFit: 'cover',
-      }}
-    />
+    {/* Logo + flare mask */}
+    <div style={{
+      position: 'relative',
+      width: size,
+      height: size,
+      borderRadius: size * 0.235,
+      overflow: 'hidden',
+      boxShadow: '0 20px 60px -10px rgba(0,0,0,0.8), 0 0 0 1px rgba(255,255,255,0.04)',
+    }}>
+      <img
+        src="/logo.png"
+        alt="Control."
+        width={size}
+        height={size}
+        style={{
+          width: size,
+          height: size,
+          display: 'block',
+          objectFit: 'cover',
+        }}
+      />
+      {/* Lens flare animé — diagonale, très subtil */}
+      <div
+        className="logo-flare"
+        style={{
+          position: 'absolute',
+          top: 0,
+          left: '-60%',
+          width: '50%',
+          height: '100%',
+          background: 'linear-gradient(110deg, transparent 30%, rgba(255,255,255,0.14) 45%, rgba(255,255,255,0.28) 50%, rgba(255,255,255,0.14) 55%, transparent 70%)',
+          filter: 'blur(2px)',
+          pointerEvents: 'none',
+          mixBlendMode: 'screen',
+        }}
+      />
+    </div>
   </div>
 )
 
@@ -361,6 +385,14 @@ const globalStyles = `
   }
   @keyframes fadeUp { from { opacity:0; transform:translateY(20px); } to { opacity:1; transform:translateY(0); } }
   @keyframes spin { to { transform: rotate(360deg); } }
+  @keyframes logoFlare {
+    0%   { transform: translateX(0)    skewX(-18deg); opacity: 0; }
+    8%   { opacity: 1; }
+    45%  { transform: translateX(260%) skewX(-18deg); opacity: 1; }
+    55%  { transform: translateX(260%) skewX(-18deg); opacity: 0; }
+    100% { transform: translateX(260%) skewX(-18deg); opacity: 0; }
+  }
+  .logo-flare { animation: logoFlare 5.5s cubic-bezier(.4,.0,.2,1) 1.2s infinite; }
   .au-fade { animation: fadeUp 0.55s cubic-bezier(.22,1,.36,1) both; }
   .wordmark {
     text-shadow: 0 0 40px rgba(255,255,255,0.15), 0 0 80px rgba(255,255,255,0.08);
