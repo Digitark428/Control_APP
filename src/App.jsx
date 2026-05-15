@@ -906,19 +906,22 @@ const Dashboard = ({ state, setState, year, month, setMonth, openAddTx, openAddV
             const d = data.byActivity[a.id] || { total: 0, count: 0 };
             const pct = data.brut > 0 ? Math.min(100, (d.total / data.brut) * 100) : 0;
             return (
-              <Card key={a.id} className="p-4">
+              <Card key={a.id} className="p-4" onClick={() => setActivitySheet(a)}>
                 <div className="flex items-center justify-between mb-2.5">
-                  <div className="flex items-center gap-2.5">
+                  <div className="flex items-center gap-2.5 min-w-0">
                     <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: a.color }} />
-                    <div>
-                      <div className="text-[14px] font-semibold text-white leading-tight">{a.name}</div>
+                    <div className="min-w-0">
+                      <div className="text-[14px] font-semibold text-white leading-tight truncate">{a.name}</div>
                       <div className="text-[11px] text-zinc-500 mt-0.5">
                         {d.count} {d.count > 1 ? 'ventes' : 'vente'}
                         {!a.taxable && <span className="ml-1.5 px-1.5 py-px rounded-md bg-zinc-800 text-zinc-400 text-[9px] uppercase tracking-wider">non URSSAF</span>}
                       </div>
                     </div>
                   </div>
-                  <div className="text-[16px] font-bold text-white">{fmt(d.total, { decimals: 0 })} €</div>
+                  <div className="flex items-center gap-2 flex-shrink-0">
+                    <div className="text-[16px] font-bold text-white">{fmt(d.total, { decimals: 0 })} €</div>
+                    <ChevronRight className="w-4 h-4 text-zinc-600" strokeWidth={2.5} />
+                  </div>
                 </div>
                 <div className="h-1 bg-zinc-800 rounded-full overflow-hidden">
                   <div
