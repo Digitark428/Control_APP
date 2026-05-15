@@ -466,10 +466,124 @@ const useReminders = (state) => {
 };
 
 // ---------------------------------------------------------------------------
+// Activity sales sheet — détail des ventes d'une activité pour un mois donné
+// ---------------------------------------------------------------------------
+
+const ActivitySalesSheet = ({ activity, state, setState, year, month, onClose, openAddTx }) => {
+  const open = !!activity;
+  const txs = useMemo(() => {
+    if (!activity) return [];
+    return state.transactions
+      .filter(t => {
+        const d = new Date(t.date);
+        return t.activityId === activity.id && d.getFullYear() === year && d.getMonth() === month;
+      })
+      .sort((a, b) => new Date(b.date) - new Date(a.date));
+  }, [activity, state.transactions, year, month]);
+
+  const clientMap = useMemo(() => {
+    const m = {};
+    (state.clients || []).forEach(c => { m[c.id] = c; });
+    return m;
+  }, [state.clients]);
+
+  const total = txs.reduce((s, t) => s + Number(t.amount || 0), 0);
+  const avg = txs.length > 0 ? total / txs.length : 0;
+
+  const deleteTx = (id) => {
+    setState(s => ({ ...s, transactions: s.transactions.filter(t => t.id !== id) }));
+  };
+
+  if (!activity) return null;
+
+  return (
+    <Sheet open={open} onClose={onClose} title={activity.name}>
+      {/* Résumé */}
+      <div className="mt-1 mb-4 rounded-2xl p-4" style={{
+        background: 'linear-gradient(135deg, #1C1C1E 0%, #252527 100%)',
+        border: '1px solid rgba(255,255,255,0.06)',
+      }}>
+        <div className="flex items-center gap-2 mb-2">
+          <div className="w-2 h-2 rounded-full" style={{ backgroundColor: activity.color }} />
+          <span className="text-[10px] uppercase tracking-wider text-zinc-500 font-medium">
+            {MONTHS_FR[month]} {year}
+          </span>
+          {!activity.taxable && (
+            <span className="px-1.5 py-px rounded bg-zinc-800 text-zinc-400 text-[9px] uppercase tracking-wider">non URSSAF</span>
+          )}
+        </div>
+        <div className="flex items-baseline gap-2">
+          <span className="text-[34px] font-bold text-white leading-none tracking-tight">{fmt(total, { decimals: 0 })}</span>
+          <span className="text-[18px] text-zinc-500 font-medium">€</span>
+        </div>
+        <div className="flex items-center gap-4 mt-3 text-[11px] text-zinc-500">
+          <span><span className="text-zinc-300 font-semibold">{txs.length}</span> vente{txs.length !== 1 ? 's' : ''}</span>
+          {txs.length > 0 && (
+            <span>Panier moyen <span className="text-zinc-300 font-semibold">{fmt(avg, { decimals: 0 })} €</span></span>
+          )}
+        </div>
+      </div>
+
+      {/* Liste des ventes */}
+      {txs.length === 0 ? (
+        <div className="text-center py-10">
+          <div className="text-[13px] text-zinc-500 mb-4">Aucune vente sur {MONTHS_FR[month]}.</div>
+          <button
+            onClick={() => { onClose(); openAddTx && openAddTx(); }}
+            className="inline-flex items-center gap-2 px-4 py-2.5 rounded-full bg-white/[0.06] border border-white/[0.08] text-[13px] font-medium text-white active:bg-white/[0.1]"
+          >
+            <Plus className="w-3.5 h-3.5" /> Ajouter une vente
+          </button>
+        </div>
+      ) : (
+        <div className="rounded-2xl overflow-hidden" style={{
+          background: 'rgba(255,255,255,0.025)',
+          border: '1px solid rgba(255,255,255,0.06)',
+        }}>
+          {txs.map((t, i) => {
+            const client = t.clientId ? clientMap[t.clientId] : null;
+            return (
+              <div
+                key={t.id}
+                className={`flex items-center justify-between p-4 ${i < txs.length - 1 ? 'border-b border-zinc-800/60' : ''}`}
+              >
+                <div className="flex-1 min-w-0 pr-3">
+                  <div className="text-[14px] font-medium text-white truncate">
+                    {t.description || 'Sans description'}
+                  </div>
+                  <div className="text-[11px] text-zinc-500 mt-0.5 flex items-center gap-2">
+                    <span>{new Date(t.date).toLocaleDateString('fr-FR', { day: '2-digit', month: 'short' })}</span>
+                    {client && (
+                      <>
+                        <span className="text-zinc-700">·</span>
+                        <span className="flex items-center gap-1 truncate">
+                          <Users className="w-2.5 h-2.5" />
+                          <span className="truncate">{client.name}</span>
+                        </span>
+                      </>
+                    )}
+                  </div>
+                </div>
+                <div className="flex items-center gap-3 flex-shrink-0">
+                  <div className="text-[14px] font-semibold text-white">{fmt(t.amount, { decimals: 2 })} €</div>
+                  <button onClick={() => deleteTx(t.id)} className="text-zinc-600 active:text-rose-400 transition-colors">
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </Sheet>
+  );
+};
+
+// ---------------------------------------------------------------------------
 // Dashboard
 // ---------------------------------------------------------------------------
 
-const Dashboard = ({ state, year, month, setMonth, openAddTx, openAddVar, setTab, user }) => {
+const Dashboard = ({ state, setState, year, month, setMonth, openAddTx, openAddVar, setTab, user }) => {
   const data = useMemo(() => computeMonth(state, year, month), [state, year, month]);
   const varData = useMemo(() => computeVarMonth(state, year, month), [state, year, month]);
   const quarter = getQuarter(month);
@@ -498,6 +612,9 @@ const Dashboard = ({ state, year, month, setMonth, openAddTx, openAddVar, setTab
   const chargesUnpaid = data.charges - data.chargesPaid;
   const chargesPaidCount = data.dueExpenses.filter(e => e.paid).length;
   const userFirstName = user?.user_metadata?.username || user?.user_metadata?.first_name || 'toi';
+
+  // Détail des ventes par activité (sheet)
+  const [activitySheet, setActivitySheet] = useState(null);
 
   return (
     <div className="pb-32">
@@ -597,14 +714,23 @@ const Dashboard = ({ state, year, month, setMonth, openAddTx, openAddVar, setTab
           </div>
           <div className="mt-3 flex flex-wrap gap-2">
             {activeActivities.map(a => {
-              const d = data.byActivity[a.id] || { total: 0 };
+              const d = data.byActivity[a.id] || { total: 0, count: 0 };
               if (d.total === 0) return null;
               return (
-                <div key={a.id} className="flex items-center gap-1.5">
+                <button
+                  key={a.id}
+                  onClick={() => setActivitySheet(a)}
+                  className="flex items-center gap-1.5 pl-2 pr-2.5 py-1 rounded-full active:scale-[0.97] transition-transform"
+                  style={{
+                    background: 'rgba(255,255,255,0.04)',
+                    border: '1px solid rgba(255,255,255,0.06)',
+                  }}
+                >
                   <div className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: a.color }} />
                   <span className="text-[11px] text-zinc-400">{a.name}</span>
-                  <span className="text-[11px] font-semibold text-zinc-300">{fmt(d.total, { decimals: 0 })} €</span>
-                </div>
+                  <span className="text-[11px] font-semibold text-zinc-200">{fmt(d.total, { decimals: 0 })} €</span>
+                  <ChevronRight className="w-3 h-3 text-zinc-600 -mr-0.5" strokeWidth={2.5} />
+                </button>
               );
             })}
           </div>
@@ -839,6 +965,16 @@ const Dashboard = ({ state, year, month, setMonth, openAddTx, openAddVar, setTab
           </div>
         </Card>
       </div>
+
+      <ActivitySalesSheet
+        activity={activitySheet}
+        state={state}
+        setState={setState}
+        year={year}
+        month={month}
+        openAddTx={openAddTx}
+        onClose={() => setActivitySheet(null)}
+      />
     </div>
   );
 };
@@ -852,6 +988,12 @@ const RevenuePage = ({ state, setState, year, month, setMonth, openAddTx }) => {
   const visibleActivities = useMemo(() =>
     [...state.activities].sort((a, b) => a.order - b.order),
     [state.activities]);
+
+  const clientMap = useMemo(() => {
+    const m = {};
+    (state.clients || []).forEach(c => { m[c.id] = c; });
+    return m;
+  }, [state.clients]);
 
   const deleteTx = (id) => {
     setState(s => ({ ...s, transactions: s.transactions.filter(t => t.id !== id) }));
@@ -904,12 +1046,23 @@ const RevenuePage = ({ state, setState, year, month, setMonth, openAddTx }) => {
                 <span className="text-[13px] font-bold text-white">{fmt(total, { decimals: 2 })} €</span>
               </div>
               <Card>
-                {txs.map((t, i) => (
+                {txs.map((t, i) => {
+                  const client = t.clientId ? clientMap[t.clientId] : null;
+                  return (
                   <div key={t.id} className={`flex items-center justify-between p-4 ${i < txs.length - 1 ? 'border-b border-zinc-800/60' : ''}`}>
                     <div className="flex-1 min-w-0 pr-3">
                       <div className="text-[14px] font-medium text-white truncate">{t.description || 'Sans description'}</div>
-                      <div className="text-[11px] text-zinc-500 mt-0.5">
-                        {new Date(t.date).toLocaleDateString('fr-FR', { day: '2-digit', month: 'short' })}
+                      <div className="text-[11px] text-zinc-500 mt-0.5 flex items-center gap-2">
+                        <span>{new Date(t.date).toLocaleDateString('fr-FR', { day: '2-digit', month: 'short' })}</span>
+                        {client && (
+                          <>
+                            <span className="text-zinc-700">·</span>
+                            <span className="flex items-center gap-1 truncate">
+                              <Users className="w-2.5 h-2.5" />
+                              <span className="truncate">{client.name}</span>
+                            </span>
+                          </>
+                        )}
                       </div>
                     </div>
                     <div className="flex items-center gap-3">
@@ -919,7 +1072,8 @@ const RevenuePage = ({ state, setState, year, month, setMonth, openAddTx }) => {
                       </button>
                     </div>
                   </div>
-                ))}
+                  );
+                })}
               </Card>
             </div>
           );
@@ -2955,7 +3109,7 @@ export default function App() {
 
       <div className="max-w-md mx-auto min-h-screen">
         <div className="pt-2">
-          {tab === 'dashboard' && <Dashboard state={state} year={year} month={month} setMonth={setMonth} openAddTx={() => setAddOpen(true)} openAddVar={() => setAddVarOpen(true)} setTab={setTab} user={user} />}
+          {tab === 'dashboard' && <Dashboard state={state} setState={setState} year={year} month={month} setMonth={setMonth} openAddTx={() => setAddOpen(true)} openAddVar={() => setAddVarOpen(true)} setTab={setTab} user={user} />}
           {tab === 'revenue'   && <RevenuePage state={state} setState={setState} year={year} month={month} setMonth={setMonth} openAddTx={() => setAddOpen(true)} />}
           {tab === 'expenses'  && <ExpensesPage state={state} setState={setState} year={year} month={month} setMonth={setMonth} />}
           {tab === 'varexp'    && <VarExpensesPage state={state} setState={setState} year={year} month={month} setMonth={setMonth} />}
