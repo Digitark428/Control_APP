@@ -3,7 +3,7 @@ import { loadState, saveState } from './lib/db';
 import { supabase } from './lib/supabase';
 import AuthScreen from './components/AuthScreen';
 import SplashScreen from './components/SplashScreen';
-import { Plus, ChevronLeft, ChevronRight, X, Trash2, Wallet, Edit3, Check, Home, BarChart3, Receipt, Sliders, AlertCircle, Power, Bell, Clock, FileText, EyeOff, ShoppingBag, User, TrendingUp, Users, Camera, Lock, Mail } from 'lucide-react';
+import { Plus, ChevronLeft, ChevronRight, X, Trash2, Wallet, Edit3, Check, Home, BarChart3, Receipt, Sliders, AlertCircle, Power, Bell, Clock, FileText, EyeOff, ShoppingBag, User, TrendingUp, Users, Camera, Lock, Mail, Target, Download, AlertTriangle, Calendar } from 'lucide-react';
 
 // ---------------------------------------------------------------------------
 // Constants & defaults
@@ -37,9 +37,19 @@ const TODAY_YEAR = TODAY.getFullYear();
 // Helpers
 // ---------------------------------------------------------------------------
 
+// Flag global pour le toggle "Afficher les décimales".
+// Maintenu en sync avec state.settings.showDecimals via useEffect dans App.
+// Les calculs sous-jacents restent toujours précis : seul l'affichage est concerné.
+let __SHOW_DECIMALS__ = true;
+const setShowDecimalsFlag = (v) => { __SHOW_DECIMALS__ = v !== false; };
+
 const fmt = (n, opts = {}) => {
   const { decimals } = opts;
   const v = Number(n) || 0;
+  // Si l'utilisateur a désactivé les décimales, on force 0 partout.
+  if (!__SHOW_DECIMALS__) {
+    return v.toLocaleString('fr-FR', { minimumFractionDigits: 0, maximumFractionDigits: 0 });
+  }
   const d = decimals !== undefined ? decimals : (Math.abs(v) >= 1000 ? 0 : 2);
   return v.toLocaleString('fr-FR', { minimumFractionDigits: d, maximumFractionDigits: d });
 };
@@ -116,8 +126,11 @@ const DEFAULT_STATE = {
   profile: {
     avatar: null, // data URL (base64) ou null
   },
+  controls: [],
   settings: {
     ursaffRate: 0,
+    ursaffEnabled: true,
+    showDecimals: true,
     weeklyUberObjective: 460,
     declarationFrequency: 'quarterly',
     notificationsEnabled: true,
@@ -148,9 +161,12 @@ const migrateState = (legacy) => {
     varCategories: legacy.varCategories || DEFAULT_VAR_CATEGORIES,
     varExpenses: legacy.varExpenses || [],
     clients: legacy.clients || [],
+    controls: legacy.controls || [],
     profile: legacy.profile || { avatar: null },
     settings: {
       ursaffRate: legacy.settings?.ursaffRate ?? 0,
+      ursaffEnabled: legacy.settings?.ursaffEnabled !== false,
+      showDecimals: legacy.settings?.showDecimals !== false,
       weeklyUberObjective: legacy.settings?.weeklyUberObjective ?? 460,
       declarationFrequency: 'quarterly',
       notificationsEnabled: true,
@@ -193,8 +209,14 @@ const useAppState = (user) => {
 
     loadState().then(remote => {
       if (remote) {
-        // Backfill des nouveaux champs (profile, etc.) pour anciens états distants
-        const merged = { ...DEFAULT_STATE, ...remote, profile: { ...DEFAULT_STATE.profile, ...(remote.profile || {}) } };
+        // Backfill des nouveaux champs (profile, controls, settings) pour anciens états distants
+        const merged = {
+          ...DEFAULT_STATE,
+          ...remote,
+          profile: { ...DEFAULT_STATE.profile, ...(remote.profile || {}) },
+          controls: remote.controls || [],
+          settings: { ...DEFAULT_STATE.settings, ...(remote.settings || {}) },
+        };
         setState(merged);
         localStorage.setItem(STORAGE_KEY, JSON.stringify(merged));
       }
@@ -239,7 +261,10 @@ const computeMonth = (state, year, month) => {
   });
 
   const brut = brutTaxable + brutNonTaxable;
-  const ursaff = brutTaxable * state.settings.ursaffRate;
+  // Si l'utilisateur a désactivé la gestion URSSAF, on neutralise les cotisations
+  // partout. Le taux est préservé pour une réactivation simple.
+  const ursaffActive = state.settings.ursaffEnabled !== false;
+  const ursaff = ursaffActive ? brutTaxable * state.settings.ursaffRate : 0;
 
   const dueExpenses = state.expenses
     .filter(e => isExpenseDueInMonth(e, year, month))
@@ -276,7 +301,7 @@ const computeQuarter = (state, year, quarter) => {
     months,
     brutTaxable,
     brutNonTaxable,
-    ursaffDue: brutTaxable * state.settings.ursaffRate,
+    ursaffDue: (state.settings.ursaffEnabled !== false) ? brutTaxable * state.settings.ursaffRate : 0,
   };
 };
 
@@ -615,6 +640,29 @@ const Dashboard = ({ state, setState, year, month, setMonth, openAddTx, openAddV
 
   // Détail des ventes par activité (sheet)
   const [activitySheet, setActivitySheet] = useState(null);
+  const [controlSheet, setControlSheet] = useState(null); // Control. à valider
+
+  // ── Suivi des dépenses du jour ──────────────────────────────────────────
+  // Calcule le total des vraies dépenses (varExpenses) sur la journée en cours.
+  // Les Control. non validés ne sont PAS comptés ici — seuls les paiements réels.
+  const todayKey = useMemo(() => {
+    const t = new Date();
+    return `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, '0')}-${String(t.getDate()).padStart(2, '0')}`;
+  }, []);
+  const todayExpenses = useMemo(() => {
+    return (state.varExpenses || [])
+      .filter(e => (e.date || '').slice(0, 10) === todayKey)
+      .reduce((s, e) => s + Number(e.amount || 0), 0);
+  }, [state.varExpenses, todayKey]);
+
+  // ── Control. prévus aujourd'hui ─────────────────────────────────────────
+  // Récupère tous les Control. dont la date est aujourd'hui et qui ne sont pas
+  // encore validés (status undefined ou 'pending'). Le plus proche en premier.
+  const todayControls = useMemo(() => {
+    return (state.controls || [])
+      .filter(c => (c.date || '').slice(0, 10) === todayKey && c.status !== 'validated' && c.status !== 'cancelled')
+      .sort((a, b) => (a.time || '').localeCompare(b.time || ''));
+  }, [state.controls, todayKey]);
 
   return (
     <div className="pb-32">
@@ -642,7 +690,7 @@ const Dashboard = ({ state, setState, year, month, setMonth, openAddTx, openAddV
       </div>
 
       {/* ── QUICK ACTIONS ────────────────────────────────────────────────── */}
-      <div className="px-5 mb-4 anim-1">
+      <div className="px-5 mb-3 anim-1">
         <div className="flex gap-2">
           <button
             onClick={openAddTx}
@@ -658,6 +706,55 @@ const Dashboard = ({ state, setState, year, month, setMonth, openAddTx, openAddV
           </button>
         </div>
       </div>
+
+      {/* ── BANDEAU "AUJOURD'HUI" : dépenses + Control. prévu ───────────── */}
+      {(todayExpenses > 0 || todayControls.length > 0) && (
+        <div className="px-5 mb-3 anim-1">
+          <div className="flex gap-2">
+            {/* Dépenses aujourd'hui */}
+            {todayExpenses > 0 && (
+              <button
+                onClick={() => setTab('varexp')}
+                className={`${todayControls.length > 0 ? 'flex-1' : 'flex-1'} text-left rounded-2xl p-3.5 active:scale-[0.98] transition-transform`}
+                style={{
+                  background: 'linear-gradient(135deg, rgba(255,69,58,0.08) 0%, rgba(255,69,58,0.03) 100%)',
+                  border: '1px solid rgba(255,69,58,0.15)',
+                }}
+              >
+                <div className="text-[10px] uppercase tracking-wider text-rose-400/70 font-semibold mb-0.5">Aujourd'hui</div>
+                <div className="flex items-baseline gap-1">
+                  <span className="text-[18px] font-bold text-rose-300 leading-none">{fmt(todayExpenses, { decimals: 2 })}</span>
+                  <span className="text-[12px] text-rose-400/60 font-medium">€</span>
+                </div>
+                <div className="text-[10px] text-rose-400/50 mt-1">dépensés</div>
+              </button>
+            )}
+
+            {/* Control. prévu */}
+            {todayControls.length > 0 && (() => {
+              const c = todayControls[0];
+              const total = (c.items || []).reduce((s, it) => s + Number(it.amount || 0), 0);
+              return (
+                <button
+                  onClick={() => setControlSheet(c)}
+                  className={`${todayExpenses > 0 ? 'flex-1' : 'w-full'} text-left rounded-2xl p-3.5 active:scale-[0.98] transition-transform`}
+                  style={{
+                    background: 'linear-gradient(135deg, rgba(94,92,230,0.10) 0%, rgba(94,92,230,0.04) 100%)',
+                    border: '1px solid rgba(94,92,230,0.18)',
+                  }}
+                >
+                  <div className="text-[10px] uppercase tracking-wider text-indigo-400/80 font-semibold mb-0.5 flex items-center gap-1">
+                    <Clock className="w-2.5 h-2.5" />
+                    Control. {c.time ? `· ${c.time}` : ''}
+                  </div>
+                  <div className="text-[13px] font-bold text-white truncate leading-tight">{c.name || 'Sans nom'}</div>
+                  <div className="text-[11px] text-indigo-300/70 mt-0.5">{fmt(total, { decimals: 0 })} € prévus</div>
+                </button>
+              );
+            })()}
+          </div>
+        </div>
+      )}
 
       {/* Reminders strip */}
       {reminders.length > 0 && (
@@ -738,6 +835,7 @@ const Dashboard = ({ state, setState, year, month, setMonth, openAddTx, openAddV
       </div>
 
       {/* ── BLOC 2 : Bénéfice après URSSAF ──────────────────────────────── */}
+      {state.settings.ursaffEnabled !== false && (
       <div className="px-5 mt-3 anim-2">
         <div
           className="rounded-3xl p-6 relative overflow-hidden"
@@ -789,6 +887,7 @@ const Dashboard = ({ state, setState, year, month, setMonth, openAddTx, openAddV
           </div>
         </div>
       </div>
+      )}
 
       {/* ── DÉPENSES DU MOIS (rouge) ─────────────────────────────────────── */}
       <div className="px-5 mt-3 anim-3">
@@ -835,12 +934,15 @@ const Dashboard = ({ state, setState, year, month, setMonth, openAddTx, openAddV
           </div>
 
           <div className="mt-5 space-y-3">
-            <div className="flex items-center justify-between">
+            <button
+              onClick={() => setTab('expenses')}
+              className="w-full flex items-center justify-between active:opacity-60 transition-opacity"
+            >
               <div className="flex items-center gap-2.5">
                 <div className="w-7 h-7 rounded-xl bg-zinc-800/80 flex items-center justify-center">
                   <Receipt className="w-3.5 h-3.5 text-zinc-400" />
                 </div>
-                <div>
+                <div className="text-left">
                   <div className="text-[13px] font-medium text-zinc-200">Charges fixes</div>
                   <div className="text-[10px] text-zinc-600">{chargesPaidCount}/{data.dueExpenses.length} payées</div>
                 </div>
@@ -849,24 +951,28 @@ const Dashboard = ({ state, setState, year, month, setMonth, openAddTx, openAddV
                 <div className="text-[14px] font-bold text-zinc-400">−{fmt(data.chargesPaid, { decimals: 0 })} €</div>
                 {chargesUnpaid > 0 && <div className="text-[10px] text-zinc-600">{fmt(chargesUnpaid, { decimals: 0 })} € restant</div>}
               </div>
-            </div>
-            <div className="flex items-center justify-between">
+            </button>
+            <button
+              onClick={() => setTab('varexp')}
+              className="w-full flex items-center justify-between active:opacity-60 transition-opacity"
+            >
               <div className="flex items-center gap-2.5">
                 <div className="w-7 h-7 rounded-xl bg-zinc-800/80 flex items-center justify-center">
                   <ShoppingBag className="w-3.5 h-3.5 text-zinc-400" />
                 </div>
-                <div>
+                <div className="text-left">
                   <div className="text-[13px] font-medium text-zinc-200">Dépenses</div>
                   <div className="text-[10px] text-zinc-600">{varData.items.length} opération{varData.items.length !== 1 ? 's' : ''}</div>
                 </div>
               </div>
               <div className="text-[14px] font-bold text-zinc-400">−{fmt(varData.total, { decimals: 0 })} €</div>
-            </div>
+            </button>
           </div>
         </div>
       </div>
 
       {/* ── DÉCLARATION URSSAF ───────────────────────────────────────────── */}
+      {state.settings.ursaffEnabled !== false && (
       <div className="px-5 mt-2 anim-4">
         <Card className="p-5" onClick={() => setTab('year')}>
           <div className="flex items-center justify-between">
@@ -891,6 +997,7 @@ const Dashboard = ({ state, setState, year, month, setMonth, openAddTx, openAddV
           </div>
         </Card>
       </div>
+      )}
 
       {/* ── ACTIVITÉS ────────────────────────────────────────────────────── */}
       <div className="px-5 mt-6 anim-5">
@@ -1011,20 +1118,28 @@ const RevenuePage = ({ state, setState, year, month, setMonth, openAddTx }) => {
       />
 
       <div className="px-5">
-        <div className="grid grid-cols-2 gap-2 mb-4">
-          <Card className="p-4">
-            <div className="text-[10px] uppercase tracking-wider text-zinc-500 font-medium mb-1">CA URSSAF</div>
-            <div className="text-xl font-bold text-white">{fmt(data.brutTaxable, { decimals: 0 })} €</div>
-            <div className="text-[11px] text-orange-400 mt-1">
-              → {fmt(data.ursaff, { decimals: 0 })} € de cotisations
-            </div>
+        {state.settings.ursaffEnabled !== false ? (
+          <div className="grid grid-cols-2 gap-2 mb-4">
+            <Card className="p-4">
+              <div className="text-[10px] uppercase tracking-wider text-zinc-500 font-medium mb-1">CA URSSAF</div>
+              <div className="text-xl font-bold text-white">{fmt(data.brutTaxable, { decimals: 0 })} €</div>
+              <div className="text-[11px] text-orange-400 mt-1">
+                → {fmt(data.ursaff, { decimals: 0 })} € de cotisations
+              </div>
+            </Card>
+            <Card className="p-4">
+              <div className="text-[10px] uppercase tracking-wider text-zinc-500 font-medium mb-1">Hors URSSAF</div>
+              <div className="text-xl font-bold text-white">{fmt(data.brutNonTaxable, { decimals: 0 })} €</div>
+              <div className="text-[11px] text-zinc-500 mt-1">non déclaré</div>
+            </Card>
+          </div>
+        ) : (
+          <Card className="p-5 mb-4">
+            <div className="text-[10px] uppercase tracking-wider text-zinc-500 font-medium mb-1">Chiffre d'affaires</div>
+            <div className="text-3xl font-bold text-white">{fmt(data.brut, { decimals: 0 })} €</div>
+            <div className="text-[11px] text-zinc-500 mt-1">{data.txs.length} vente{data.txs.length !== 1 ? 's' : ''}</div>
           </Card>
-          <Card className="p-4">
-            <div className="text-[10px] uppercase tracking-wider text-zinc-500 font-medium mb-1">Hors URSSAF</div>
-            <div className="text-xl font-bold text-white">{fmt(data.brutNonTaxable, { decimals: 0 })} €</div>
-            <div className="text-[11px] text-zinc-500 mt-1">non déclaré</div>
-          </Card>
-        </div>
+        )}
 
         <button
           onClick={openAddTx}
@@ -1273,24 +1388,37 @@ const YearPage = ({ state, year, setMonth, setTab }) => {
       <div className="px-5">
         <Card className="p-5 mb-4">
           <div className="text-[11px] uppercase tracking-wider text-zinc-500 font-medium mb-3">Bilan {year}</div>
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <div className="text-[11px] text-zinc-500">CA URSSAF</div>
-              <div className="text-xl font-bold text-white">{fmt(totals.brutTaxable, { decimals: 0 })} €</div>
+          {state.settings.ursaffEnabled !== false ? (
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <div className="text-[11px] text-zinc-500">CA URSSAF</div>
+                <div className="text-xl font-bold text-white">{fmt(totals.brutTaxable, { decimals: 0 })} €</div>
+              </div>
+              <div>
+                <div className="text-[11px] text-zinc-500">Hors URSSAF</div>
+                <div className="text-xl font-bold text-zinc-300">{fmt(totals.brutNonTaxable, { decimals: 0 })} €</div>
+              </div>
+              <div>
+                <div className="text-[11px] text-zinc-500">URSSAF dû</div>
+                <div className="text-xl font-bold text-orange-400">{fmt(totals.ursaff, { decimals: 0 })} €</div>
+              </div>
+              <div>
+                <div className="text-[11px] text-zinc-500">Charges</div>
+                <div className="text-xl font-bold text-rose-400">{fmt(totals.charges, { decimals: 0 })} €</div>
+              </div>
             </div>
-            <div>
-              <div className="text-[11px] text-zinc-500">Hors URSSAF</div>
-              <div className="text-xl font-bold text-zinc-300">{fmt(totals.brutNonTaxable, { decimals: 0 })} €</div>
+          ) : (
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <div className="text-[11px] text-zinc-500">Chiffre d'affaires</div>
+                <div className="text-xl font-bold text-white">{fmt(totals.brut, { decimals: 0 })} €</div>
+              </div>
+              <div>
+                <div className="text-[11px] text-zinc-500">Charges</div>
+                <div className="text-xl font-bold text-rose-400">{fmt(totals.charges, { decimals: 0 })} €</div>
+              </div>
             </div>
-            <div>
-              <div className="text-[11px] text-zinc-500">URSSAF dû</div>
-              <div className="text-xl font-bold text-orange-400">{fmt(totals.ursaff, { decimals: 0 })} €</div>
-            </div>
-            <div>
-              <div className="text-[11px] text-zinc-500">Charges</div>
-              <div className="text-xl font-bold text-rose-400">{fmt(totals.charges, { decimals: 0 })} €</div>
-            </div>
-          </div>
+          )}
           <div className="border-t border-zinc-800 mt-4 pt-3 flex items-center justify-between">
             <div className="text-[11px] uppercase tracking-wider text-zinc-500 font-medium">Net annuel</div>
             <div className={`text-2xl font-bold ${totals.net >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
@@ -1299,6 +1427,7 @@ const YearPage = ({ state, year, setMonth, setTab }) => {
           </div>
         </Card>
 
+        {state.settings.ursaffEnabled !== false && (<>
         <div className="text-[11px] uppercase tracking-wider font-semibold text-zinc-500 mb-2 px-1">Déclarations URSSAF</div>
         <div className="grid grid-cols-2 gap-2 mb-5">
           {quarters.map(q => (
@@ -1309,6 +1438,7 @@ const YearPage = ({ state, year, setMonth, setTab }) => {
             </Card>
           ))}
         </div>
+        </>)}
 
         <div className="text-[11px] uppercase tracking-wider font-semibold text-zinc-500 mb-2 px-1">Dépenses annuelles</div>
         <Card className="p-5 mb-5">
@@ -1397,7 +1527,10 @@ const YearPage = ({ state, year, setMonth, setTab }) => {
             const d = new Date(t.date);
             if (d.getFullYear() === year) byActivity[t.activityId] = (byActivity[t.activityId] || 0) + Number(t.amount || 0);
           });
-          const sorted = [...state.activities].sort((a, b) => (byActivity[b.id] || 0) - (byActivity[a.id] || 0));
+          const sorted = [...state.activities]
+            .filter(a => (byActivity[a.id] || 0) > 0)
+            .sort((a, b) => (byActivity[b.id] || 0) - (byActivity[a.id] || 0));
+          if (sorted.length === 0) return null;
           return (
             <div className="mt-6">
               <div className="text-[11px] uppercase tracking-wider font-semibold text-zinc-500 mb-2 px-1">Par activité</div>
@@ -1405,14 +1538,53 @@ const YearPage = ({ state, year, setMonth, setTab }) => {
                 {sorted.map((a, i) => {
                   const total = byActivity[a.id] || 0;
                   const pct = totals.brut > 0 ? (total / totals.brut) * 100 : 0;
+                  const rank = i + 1; // 1, 2, 3...
+                  const isPodium = rank <= 3;
+                  const isTop1 = rank === 1;
                   return (
-                    <div key={a.id} className={`p-4 ${i < sorted.length - 1 ? 'border-b border-zinc-800/60' : ''}`}>
+                    <div
+                      key={a.id}
+                      className={`p-4 ${i < sorted.length - 1 ? 'border-b border-zinc-800/60' : ''}`}
+                      style={isTop1 ? {
+                        background: 'linear-gradient(180deg, rgba(255,255,255,0.025) 0%, transparent 100%)',
+                      } : {}}
+                    >
                       <div className="flex items-center justify-between mb-2">
-                        <div className="flex items-center gap-2.5">
-                          <div className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: a.color }} />
-                          <div className="text-[14px] font-medium text-white">{a.name}</div>
+                        <div className="flex items-center gap-2.5 min-w-0">
+                          {isPodium && (
+                            <span className={`text-[10px] font-bold tabular-nums w-4 text-center ${
+                              isTop1 ? 'text-white' : rank === 2 ? 'text-zinc-300' : 'text-zinc-500'
+                            }`} style={isTop1 ? { textShadow: '0 0 8px rgba(255,255,255,0.35)' } : {}}>
+                              {rank}
+                            </span>
+                          )}
+                          <div className={`rounded-full flex-shrink-0 ${isTop1 ? 'w-3 h-3' : 'w-2.5 h-2.5'}`}
+                            style={{
+                              backgroundColor: a.color,
+                              boxShadow: isTop1 ? `0 0 10px ${a.color}80` : 'none',
+                            }} />
+                          <div className={`font-medium text-white truncate ${isTop1 ? 'text-[15px]' : 'text-[14px]'}`}
+                            style={isTop1 ? { letterSpacing: '-0.2px' } : {}}>
+                            {a.name}
+                          </div>
+                          {isTop1 && pct >= 40 && (
+                            <span className="px-1.5 py-px rounded-md text-[9px] font-semibold uppercase tracking-wider flex-shrink-0"
+                              style={{ background: 'rgba(255,255,255,0.08)', color: 'rgba(255,255,255,0.7)', border: '1px solid rgba(255,255,255,0.08)' }}>
+                              Source principale
+                            </span>
+                          )}
+                          {rank === 2 && pct >= 20 && (
+                            <span className="px-1.5 py-px rounded-md bg-zinc-800/80 text-zinc-400 text-[9px] uppercase tracking-wider flex-shrink-0">
+                              Activité clé
+                            </span>
+                          )}
                         </div>
-                        <div className="text-[14px] font-bold text-white">{fmt(total, { decimals: 0 })} €</div>
+                        <div className="flex items-baseline gap-1.5 flex-shrink-0">
+                          <span className={`font-bold text-white ${isTop1 ? 'text-[15px]' : 'text-[14px]'}`}>
+                            {fmt(total, { decimals: 0 })} €
+                          </span>
+                          <span className="text-[11px] text-zinc-500 tabular-nums">{pct.toFixed(0)}%</span>
+                        </div>
                       </div>
                       <div className="h-1 bg-zinc-800 rounded-full overflow-hidden">
                         <div className="h-full rounded-full" style={{ width: `${pct}%`, backgroundColor: a.color }} />
@@ -1443,16 +1615,52 @@ const YearPage = ({ state, year, setMonth, setTab }) => {
                 {sorted.map(([cid, total], i) => {
                   const client = (state.clients || []).find(c => c.id === cid);
                   const pct = totals.brut > 0 ? (total / totals.brut) * 100 : 0;
+                  const rank = i + 1;
+                  const isPodium = rank <= 3;
+                  const isTop1 = rank === 1;
                   return (
-                    <div key={cid} className={`p-4 ${i < sorted.length - 1 ? 'border-b border-zinc-800/60' : ''}`}>
+                    <div
+                      key={cid}
+                      className={`p-4 ${i < sorted.length - 1 ? 'border-b border-zinc-800/60' : ''}`}
+                      style={isTop1 ? {
+                        background: 'linear-gradient(180deg, rgba(255,255,255,0.025) 0%, transparent 100%)',
+                      } : {}}
+                    >
                       <div className="flex items-center justify-between mb-2">
-                        <div className="flex items-center gap-2.5">
-                          <div className="w-7 h-7 rounded-full bg-zinc-800 flex items-center justify-center">
-                            <User className="w-3.5 h-3.5 text-zinc-400" />
+                        <div className="flex items-center gap-2.5 min-w-0">
+                          {isPodium && (
+                            <span className={`text-[10px] font-bold tabular-nums w-4 text-center ${
+                              isTop1 ? 'text-white' : rank === 2 ? 'text-zinc-300' : 'text-zinc-500'
+                            }`} style={isTop1 ? { textShadow: '0 0 8px rgba(255,255,255,0.35)' } : {}}>
+                              {rank}
+                            </span>
+                          )}
+                          <div className={`rounded-full bg-zinc-800 flex items-center justify-center flex-shrink-0 ${isTop1 ? 'w-8 h-8' : 'w-7 h-7'}`}
+                            style={isTop1 ? { boxShadow: '0 0 14px rgba(96,165,250,0.25)' } : {}}>
+                            <User className={`text-zinc-400 ${isTop1 ? 'w-4 h-4' : 'w-3.5 h-3.5'}`} />
                           </div>
-                          <div className="text-[14px] font-medium text-white">{client?.name || 'Client inconnu'}</div>
+                          <div className={`font-medium text-white truncate ${isTop1 ? 'text-[15px]' : 'text-[14px]'}`}
+                            style={isTop1 ? { letterSpacing: '-0.2px' } : {}}>
+                            {client?.name || 'Client inconnu'}
+                          </div>
+                          {isTop1 && pct >= 30 && (
+                            <span className="px-1.5 py-px rounded-md text-[9px] font-semibold uppercase tracking-wider flex-shrink-0"
+                              style={{ background: 'rgba(255,255,255,0.08)', color: 'rgba(255,255,255,0.7)', border: '1px solid rgba(255,255,255,0.08)' }}>
+                              Client stratégique
+                            </span>
+                          )}
+                          {rank === 2 && pct >= 15 && (
+                            <span className="px-1.5 py-px rounded-md bg-zinc-800/80 text-zinc-400 text-[9px] uppercase tracking-wider flex-shrink-0">
+                              Partenaire clé
+                            </span>
+                          )}
                         </div>
-                        <div className="text-[14px] font-bold text-white">{fmt(total, { decimals: 0 })} €</div>
+                        <div className="flex items-baseline gap-1.5 flex-shrink-0">
+                          <span className={`font-bold text-white ${isTop1 ? 'text-[15px]' : 'text-[14px]'}`}>
+                            {fmt(total, { decimals: 0 })} €
+                          </span>
+                          <span className="text-[11px] text-zinc-500 tabular-nums">{pct.toFixed(0)}%</span>
+                        </div>
                       </div>
                       <div className="h-1 bg-zinc-800 rounded-full overflow-hidden">
                         <div className="h-full bg-blue-400 rounded-full" style={{ width: `${pct}%` }} />
@@ -1473,7 +1681,7 @@ const YearPage = ({ state, year, setMonth, setTab }) => {
 // Settings page
 // ---------------------------------------------------------------------------
 
-const SettingsPage = ({ state, setState, user, onSignOut, onBack }) => {
+const SettingsPage = ({ state, setState, user, onSignOut, onBack, onExport }) => {
   const [editActivity, setEditActivity] = useState(null);
   const [editExpense, setEditExpense] = useState(null);
   const [editCategory, setEditCategory] = useState(null);
@@ -1512,24 +1720,87 @@ const SettingsPage = ({ state, setState, user, onSignOut, onBack }) => {
       )} />
 
       <div className="px-5">
-        <div className="text-[11px] uppercase tracking-wider font-semibold text-zinc-500 mb-2 px-1">Cotisations</div>
+        <div className="text-[11px] uppercase tracking-wider font-semibold text-zinc-500 mb-2 px-1">Affichage</div>
         <Card className="mb-5">
           <div className="flex items-center justify-between p-4 border-b border-zinc-800/60">
-            <div>
-              <div className="text-[14px] font-medium text-white">Taux URSSAF</div>
-              <div className="text-[11px] text-zinc-500 mt-0.5">Appliqué aux revenus déclarés · 0% = désactivé</div>
+            <div className="flex-1 pr-3">
+              <div className="text-[14px] font-medium text-white">Afficher les décimales</div>
+              <div className="text-[11px] text-zinc-500 mt-0.5">
+                {state.settings.showDecimals !== false ? '1 250,42 €' : '1 250 €'}
+                <span className="text-zinc-600"> · les calculs restent précis</span>
+              </div>
             </div>
-            <div className="flex items-center gap-1 bg-zinc-800 rounded-lg px-3 py-1.5">
-              <input
-                type="text"
-                inputMode="decimal"
-                value={ursaffInput}
-                onChange={(e) => setUrsaffInput(e.target.value)}
-                onBlur={saveUrsaff}
-                className="bg-transparent text-white text-[14px] font-semibold w-12 text-right outline-none"
-              />
-              <span className="text-zinc-400 text-[14px]">%</span>
+            <Toggle value={state.settings.showDecimals !== false} onChange={v => setSetting('showDecimals', v)} />
+          </div>
+          <div className="flex items-center justify-between p-4">
+            <div className="flex-1 pr-3">
+              <div className="text-[14px] font-medium text-white">Gestion URSSAF activée</div>
+              <div className="text-[11px] text-zinc-500 mt-0.5">
+                {state.settings.ursaffEnabled !== false
+                  ? 'Cotisations, taux et déclarations actifs'
+                  : 'Mode budget classique — URSSAF masqué partout'}
+              </div>
             </div>
+            <Toggle value={state.settings.ursaffEnabled !== false} onChange={v => setSetting('ursaffEnabled', v)} />
+          </div>
+        </Card>
+
+        <div className="text-[11px] uppercase tracking-wider font-semibold text-zinc-500 mb-2 px-1">Données</div>
+        <Card className="mb-5">
+          <button
+            onClick={() => onExport && onExport()}
+            className="w-full flex items-center justify-between p-4 active:bg-[#252527]"
+          >
+            <div className="flex items-center gap-3">
+              <div className="w-7 h-7 rounded-xl bg-blue-500/15 flex items-center justify-center flex-shrink-0">
+                <FileText className="w-3.5 h-3.5 text-blue-400" />
+              </div>
+              <div className="text-left">
+                <div className="text-[14px] font-medium text-white">Exporter mes données</div>
+                <div className="text-[11px] text-zinc-500 mt-0.5">Revenus, dépenses, bilans · CSV</div>
+              </div>
+            </div>
+            <ChevronRight className="w-4 h-4 text-zinc-600" />
+          </button>
+        </Card>
+
+        {state.settings.ursaffEnabled !== false && (<>
+        <div className="text-[11px] uppercase tracking-wider font-semibold text-zinc-500 mb-2 px-1">Cotisations</div>
+        <Card className="mb-5">
+          <div className="p-4 border-b border-zinc-800/60">
+            <div className="flex items-center justify-between mb-2">
+              <div>
+                <div className="text-[14px] font-medium text-white">Taux URSSAF</div>
+                <div className="text-[11px] text-zinc-500 mt-0.5">Appliqué aux revenus déclarés · 0% = désactivé</div>
+              </div>
+              <div className="flex items-center gap-1 bg-zinc-800 rounded-lg px-3 py-1.5">
+                <input
+                  type="text"
+                  inputMode="decimal"
+                  value={ursaffInput}
+                  onChange={(e) => setUrsaffInput(e.target.value)}
+                  className="bg-transparent text-white text-[14px] font-semibold w-12 text-right outline-none"
+                />
+                <span className="text-zinc-400 text-[14px]">%</span>
+              </div>
+            </div>
+            {/* Bouton de validation explicite — apparaît seulement si la valeur saisie diffère du taux enregistré */}
+            {(() => {
+              const v = parseFloat(ursaffInput.replace(',', '.'));
+              const valid = !isNaN(v) && v >= 0 && v <= 100;
+              const current = (state.settings.ursaffRate * 100);
+              const dirty = !isNaN(v) && Math.abs(v - current) > 0.001;
+              if (!dirty) return null;
+              return (
+                <button
+                  onClick={saveUrsaff}
+                  disabled={!valid}
+                  className="w-full mt-2 py-2.5 rounded-xl bg-white text-black text-[13px] font-semibold active:scale-[0.98] transition-transform flex items-center justify-center gap-1.5 disabled:opacity-40 disabled:bg-zinc-700 disabled:text-zinc-500"
+                >
+                  <Check className="w-3.5 h-3.5" strokeWidth={3} /> Valider {valid ? `${v}%` : ''}
+                </button>
+              );
+            })()}
           </div>
           <div className="p-4">
             <div className="text-[14px] font-medium text-white mb-2">Fréquence de déclaration</div>
@@ -1546,6 +1817,7 @@ const SettingsPage = ({ state, setState, user, onSignOut, onBack }) => {
             </div>
           </div>
         </Card>
+        </>)}
 
         <div className="text-[11px] uppercase tracking-wider font-semibold text-zinc-500 mb-2 px-1">Notifications</div>
         <Card className="mb-5">
@@ -1741,7 +2013,7 @@ const SettingsPage = ({ state, setState, user, onSignOut, onBack }) => {
           <button
             onClick={() => {
               if (!window.confirm('Effacer toutes les transactions, ventes et dépenses ? Tes activités et catégories seront conservées.')) return;
-              setState(s => ({ ...s, transactions: [], varExpenses: [], paidExpenses: {}, expenseOverrides: {}, notes: {} }));
+              setState(s => ({ ...s, transactions: [], varExpenses: [], paidExpenses: {}, expenseOverrides: {}, notes: {}, controls: [] }));
               setResetSheet(false);
             }}
             className="w-full p-4 bg-[#2C2C2E] rounded-2xl text-left active:bg-[#3A3A3C]"
@@ -2176,6 +2448,30 @@ const AddTransactionSheet = ({ open, onClose, state, setState, defaultYear, defa
               />
               <span className="absolute right-4 top-1/2 -translate-y-1/2 text-zinc-500 text-xl font-bold">€</span>
             </div>
+            {/* Estimation URSSAF dynamique — visible uniquement si activité taxable + URSSAF activée + montant > 0 */}
+            {(() => {
+              const n = parseFloat(String(amount).replace(',', '.'));
+              const ursaffEnabled = state.settings.ursaffEnabled !== false;
+              if (!activity?.taxable || !ursaffEnabled || isNaN(n) || n <= 0 || !state.settings.ursaffRate) return null;
+              const toSave = n * state.settings.ursaffRate;
+              return (
+                <div className="mt-2 px-3 py-2.5 rounded-xl flex items-center gap-2.5"
+                  style={{ background: 'rgba(255,159,10,0.08)', border: '1px solid rgba(255,159,10,0.18)' }}>
+                  <div className="w-7 h-7 rounded-lg bg-orange-500/20 flex items-center justify-center flex-shrink-0">
+                    <FileText className="w-3.5 h-3.5 text-orange-400" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="text-[10.5px] uppercase tracking-wider text-orange-400/70 font-semibold">À mettre de côté</div>
+                    <div className="text-[13.5px] font-bold text-orange-300 leading-tight">
+                      {fmt(toSave, { decimals: 2 })} € pour l'URSSAF
+                    </div>
+                  </div>
+                  <div className="text-[10px] text-orange-400/60 font-medium tabular-nums">
+                    {Math.round(state.settings.ursaffRate * 100)}%
+                  </div>
+                </div>
+              );
+            })()}
           </div>
 
           <div className="mb-5">
@@ -2687,10 +2983,851 @@ const VarExpensesPage = ({ state, setState, year, month, setMonth }) => {
 };
 
 // ---------------------------------------------------------------------------
+// Control. — feature premium de projection de dépenses futures
+// ---------------------------------------------------------------------------
+//
+// Un Control. est une projection : nom + date/heure + liste d'items (catégorie +
+// montant). Tant qu'il n'est pas validé, il n'impacte PAS les vraies dépenses ni
+// les statistiques. À la validation, ses items sont convertis en varExpenses
+// avec la date du Control., ce qui les intègre automatiquement au mois en cours
+// et à l'argent réel disponible.
+//
+// Statuts :
+//   - pending    : créé, en attente
+//   - validated  : transformé en vraies dépenses
+//   - cancelled  : annulé sans création de dépense
+// ---------------------------------------------------------------------------
+
+const computeControlImpact = (state, control) => {
+  // Total du Control. = somme des items
+  const items = control.items || [];
+  const total = items.reduce((s, it) => s + Number(it.amount || 0), 0);
+
+  // Argent disponible AVANT ce Control., sur le mois de sa date
+  const d = control.date ? new Date(control.date) : new Date();
+  const y = d.getFullYear();
+  const m = d.getMonth();
+  const monthData = computeMonth(state, y, m);
+  const varMonth = computeVarMonth(state, y, m);
+  const benefice = monthData.brut - monthData.ursaff;
+  const available = benefice - monthData.chargesPaid - varMonth.total;
+  // Les autres Control. en attente du même mois sont aussi pris en compte
+  const otherControlsTotal = (state.controls || [])
+    .filter(c => c.id !== control.id && c.status !== 'validated' && c.status !== 'cancelled')
+    .filter(c => {
+      const cd = new Date(c.date);
+      return cd.getFullYear() === y && cd.getMonth() === m;
+    })
+    .reduce((s, c) => s + (c.items || []).reduce((ss, it) => ss + Number(it.amount || 0), 0), 0);
+
+  const availableAfterOthers = available - otherControlsTotal;
+  const remainingAfter = availableAfterOthers - total;
+
+  return { total, available: availableAfterOthers, remainingAfter };
+};
+
+const ControlEditor = ({ control, state, setState, onClose }) => {
+  const [form, setForm] = useState(null);
+
+  useEffect(() => {
+    if (control) {
+      if (control.id === 'new') {
+        const t = new Date();
+        const dateStr = t.toISOString().slice(0, 10);
+        setForm({
+          id: 'new',
+          name: '',
+          date: dateStr,
+          time: `${String(t.getHours()).padStart(2, '0')}:${String(t.getMinutes()).padStart(2, '0')}`,
+          note: '',
+          items: [],
+          status: 'pending',
+        });
+      } else {
+        setForm({ ...control, items: [...(control.items || [])] });
+      }
+    }
+  }, [control]);
+
+  // Impact en temps réel — calculé même avant que form soit prêt, pour respecter
+  // les règles des Hooks (ne JAMAIS conditionner un Hook par un return early).
+  const impact = useMemo(() => {
+    if (!form) return { total: 0, available: 0, remainingAfter: 0 };
+    return computeControlImpact(state, form);
+  }, [state, form]);
+
+  if (!control || !form) return null;
+  const isNew = control.id === 'new';
+
+  const sortedCats = [...(state.varCategories || [])].sort((a, b) => a.order - b.order);
+  const overBudget = impact.remainingAfter < 0;
+
+  const addItem = () => {
+    setForm({ ...form, items: [...form.items, { id: newId(), name: '', amount: '', categoryId: sortedCats[0]?.id || '' }] });
+  };
+  const updateItem = (id, patch) => {
+    setForm({ ...form, items: form.items.map(it => it.id === id ? { ...it, ...patch } : it) });
+  };
+  const removeItem = (id) => {
+    setForm({ ...form, items: form.items.filter(it => it.id !== id) });
+  };
+
+  const save = () => {
+    if (!form.name.trim()) return;
+    // Nettoyage : conversion des montants en nombre, suppression des items vides
+    const cleanItems = form.items
+      .map(it => ({ ...it, amount: parseFloat(String(it.amount).replace(',', '.')) || 0 }))
+      .filter(it => it.amount > 0);
+    const payload = { ...form, items: cleanItems, id: isNew ? newId() : form.id };
+    setState(s => ({
+      ...s,
+      controls: isNew
+        ? [...(s.controls || []), payload]
+        : (s.controls || []).map(c => c.id === payload.id ? payload : c),
+    }));
+    onClose();
+  };
+
+  const remove = () => {
+    setState(s => ({ ...s, controls: (s.controls || []).filter(c => c.id !== form.id) }));
+    onClose();
+  };
+
+  return (
+    <Sheet open={!!control} onClose={onClose} title={isNew ? 'Nouveau Control.' : 'Modifier'}>
+      <div className="space-y-4">
+        <div>
+          <label className="text-[11px] uppercase tracking-wider text-zinc-500 font-medium">Nom</label>
+          <input
+            type="text"
+            value={form.name}
+            onChange={(e) => setForm({ ...form, name: e.target.value })}
+            placeholder="Ex. Soirée cinéma"
+            autoFocus={isNew}
+            className="w-full mt-1.5 bg-[#2C2C2E] rounded-xl px-4 py-3 text-white text-[15px] outline-none"
+          />
+        </div>
+
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <label className="text-[11px] uppercase tracking-wider text-zinc-500 font-medium">Date</label>
+            <input
+              type="date"
+              value={form.date}
+              onChange={(e) => setForm({ ...form, date: e.target.value })}
+              className="w-full mt-1.5 bg-[#2C2C2E] rounded-xl px-4 py-3 text-white text-[15px] outline-none"
+            />
+          </div>
+          <div>
+            <label className="text-[11px] uppercase tracking-wider text-zinc-500 font-medium">Heure</label>
+            <input
+              type="time"
+              value={form.time || ''}
+              onChange={(e) => setForm({ ...form, time: e.target.value })}
+              className="w-full mt-1.5 bg-[#2C2C2E] rounded-xl px-4 py-3 text-white text-[15px] outline-none"
+            />
+          </div>
+        </div>
+
+        <div>
+          <label className="text-[11px] uppercase tracking-wider text-zinc-500 font-medium">Note (optionnelle)</label>
+          <input
+            type="text"
+            value={form.note || ''}
+            onChange={(e) => setForm({ ...form, note: e.target.value })}
+            placeholder="Une précision…"
+            className="w-full mt-1.5 bg-[#2C2C2E] rounded-xl px-4 py-3 text-white text-[15px] outline-none"
+          />
+        </div>
+
+        {/* Items */}
+        <div>
+          <div className="flex items-center justify-between mb-2 px-1">
+            <label className="text-[11px] uppercase tracking-wider text-zinc-500 font-medium">Dépenses prévues</label>
+            <button onClick={addItem} className="flex items-center gap-1 text-[12px] text-emerald-400 font-medium">
+              <Plus className="w-3.5 h-3.5" /> Ajouter
+            </button>
+          </div>
+          {form.items.length === 0 ? (
+            <button
+              onClick={addItem}
+              className="w-full p-4 rounded-xl border border-dashed border-zinc-800 text-[13px] text-zinc-500 active:bg-white/5"
+            >
+              + Ajouter une dépense prévue
+            </button>
+          ) : (
+            <div className="space-y-2">
+              {form.items.map((it) => {
+                const cat = sortedCats.find(c => c.id === it.categoryId);
+                return (
+                  <div key={it.id} className="bg-[#1C1C1E] border border-zinc-800/60 rounded-xl p-3 space-y-2">
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="text"
+                        value={it.name}
+                        onChange={(e) => updateItem(it.id, { name: e.target.value })}
+                        placeholder="Ex. Cinéma"
+                        className="flex-1 bg-[#2C2C2E] rounded-lg px-3 py-2 text-white text-[13.5px] outline-none"
+                      />
+                      <div className="relative">
+                        <input
+                          type="text"
+                          inputMode="decimal"
+                          value={it.amount}
+                          onChange={(e) => updateItem(it.id, { amount: e.target.value })}
+                          placeholder="0"
+                          className="w-20 bg-[#2C2C2E] rounded-lg px-2 py-2 text-white text-[13.5px] outline-none text-right pr-5"
+                        />
+                        <span className="absolute right-2 top-1/2 -translate-y-1/2 text-zinc-500 text-[11px]">€</span>
+                      </div>
+                      <button onClick={() => removeItem(it.id)} className="text-zinc-600 active:text-rose-400 p-1">
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                    <div className="flex flex-wrap gap-1.5">
+                      {sortedCats.map(c => (
+                        <button
+                          key={c.id}
+                          onClick={() => updateItem(it.id, { categoryId: c.id })}
+                          className={`px-2 py-0.5 rounded-full text-[10.5px] font-medium flex items-center gap-1 ${
+                            it.categoryId === c.id ? 'bg-white text-black' : 'bg-[#2C2C2E] text-zinc-400'
+                          }`}
+                        >
+                          <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: c.color }} />
+                          {c.name}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+
+        {/* Analyse en temps réel */}
+        {impact.total > 0 && (
+          <div
+            className="rounded-2xl p-4"
+            style={{
+              background: overBudget
+                ? 'linear-gradient(135deg, rgba(255,69,58,0.10) 0%, rgba(255,69,58,0.04) 100%)'
+                : 'linear-gradient(135deg, rgba(48,209,88,0.10) 0%, rgba(48,209,88,0.04) 100%)',
+              border: overBudget ? '1px solid rgba(255,69,58,0.20)' : '1px solid rgba(48,209,88,0.20)',
+            }}
+          >
+            <div className="flex items-center justify-between mb-2">
+              <div className="text-[10px] uppercase tracking-wider font-semibold"
+                style={{ color: overBudget ? 'rgba(255,69,58,0.7)' : 'rgba(48,209,88,0.7)' }}>
+                Impact estimé
+              </div>
+              <div className="text-[13px] font-bold text-white">{fmt(impact.total, { decimals: 2 })} €</div>
+            </div>
+            {overBudget ? (
+              <div className="flex items-start gap-2">
+                <AlertTriangle className="w-4 h-4 text-rose-400 flex-shrink-0 mt-0.5" />
+                <div>
+                  <div className="text-[13px] font-semibold text-rose-300">Dépasse votre disponible</div>
+                  <div className="text-[11.5px] text-rose-400/70 mt-0.5">
+                    de {fmt(Math.abs(impact.remainingAfter), { decimals: 2 })} €
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <div>
+                <div className="text-[13px] font-semibold text-emerald-300">
+                  Après ce Control. : {fmt(impact.remainingAfter, { decimals: 2 })} €
+                </div>
+                <div className="text-[11px] text-emerald-400/60 mt-0.5">restant ce mois-ci</div>
+              </div>
+            )}
+          </div>
+        )}
+
+        <button
+          onClick={save}
+          disabled={!form.name.trim()}
+          className="w-full bg-white text-black font-semibold py-3.5 rounded-xl active:scale-[0.98] transition-transform disabled:opacity-40 disabled:bg-zinc-700 disabled:text-zinc-500"
+        >
+          {isNew ? 'Créer le Control.' : 'Enregistrer'}
+        </button>
+
+        {!isNew && (
+          <button onClick={remove} className="w-full text-rose-400 text-[14px] font-medium py-2">
+            Supprimer ce Control.
+          </button>
+        )}
+      </div>
+    </Sheet>
+  );
+};
+
+// Sheet de validation post-événement
+const ControlValidationSheet = ({ control, state, setState, onClose, onEdit }) => {
+  if (!control) return null;
+
+  const total = (control.items || []).reduce((s, it) => s + Number(it.amount || 0), 0);
+
+  // Valider : convertit les items en varExpenses à la date du Control.
+  const validate = () => {
+    const newVarExpenses = (control.items || [])
+      .filter(it => Number(it.amount || 0) > 0)
+      .map(it => ({
+        id: newId(),
+        amount: Number(it.amount),
+        categoryId: it.categoryId,
+        description: it.name ? `${control.name} · ${it.name}` : control.name,
+        date: control.date,
+      }));
+    setState(s => ({
+      ...s,
+      varExpenses: [...(s.varExpenses || []), ...newVarExpenses],
+      controls: (s.controls || []).map(c => c.id === control.id ? { ...c, status: 'validated' } : c),
+    }));
+    onClose();
+  };
+
+  const cancel = () => {
+    setState(s => ({
+      ...s,
+      controls: (s.controls || []).map(c => c.id === control.id ? { ...c, status: 'cancelled' } : c),
+    }));
+    onClose();
+  };
+
+  const isValidated = control.status === 'validated';
+  const isCancelled = control.status === 'cancelled';
+
+  return (
+    <Sheet open={!!control} onClose={onClose} title={control.name || 'Control.'}>
+      <div className="space-y-4">
+        {/* Header summary */}
+        <div className="rounded-2xl p-4" style={{
+          background: 'linear-gradient(135deg, #1C1C1E 0%, #252527 100%)',
+          border: '1px solid rgba(255,255,255,0.06)',
+        }}>
+          <div className="flex items-center gap-2 mb-2">
+            <Clock className="w-3 h-3 text-zinc-500" />
+            <span className="text-[11px] text-zinc-500">
+              {new Date(control.date).toLocaleDateString('fr-FR', { weekday: 'short', day: '2-digit', month: 'short' })}
+              {control.time ? ` · ${control.time}` : ''}
+            </span>
+            {isValidated && (
+              <span className="ml-auto px-1.5 py-px rounded-md bg-emerald-500/15 text-emerald-400 text-[9px] uppercase tracking-wider font-semibold">Validé</span>
+            )}
+            {isCancelled && (
+              <span className="ml-auto px-1.5 py-px rounded-md bg-zinc-800 text-zinc-500 text-[9px] uppercase tracking-wider font-semibold">Annulé</span>
+            )}
+          </div>
+          <div className="flex items-baseline gap-2">
+            <span className="text-[32px] font-bold text-white leading-none tracking-tight">{fmt(total, { decimals: 2 })}</span>
+            <span className="text-[16px] text-zinc-500 font-medium">€ prévus</span>
+          </div>
+          {control.note && (
+            <div className="text-[12px] text-zinc-500 mt-2">{control.note}</div>
+          )}
+        </div>
+
+        {/* Items list */}
+        {(control.items || []).length > 0 && (
+          <div>
+            <div className="text-[11px] uppercase tracking-wider font-semibold text-zinc-500 mb-2 px-1">Dépenses prévues</div>
+            <Card>
+              {control.items.map((it, i) => {
+                const cat = (state.varCategories || []).find(c => c.id === it.categoryId);
+                return (
+                  <div key={it.id} className={`flex items-center justify-between p-3.5 ${i < control.items.length - 1 ? 'border-b border-zinc-800/60' : ''}`}>
+                    <div className="flex items-center gap-2.5 min-w-0">
+                      {cat && <div className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: cat.color }} />}
+                      <div className="min-w-0">
+                        <div className="text-[13.5px] font-medium text-white truncate">{it.name || cat?.name || 'Sans nom'}</div>
+                        {cat && <div className="text-[10.5px] text-zinc-500 mt-0.5">{cat.name}</div>}
+                      </div>
+                    </div>
+                    <div className="text-[13.5px] font-semibold text-white flex-shrink-0">{fmt(it.amount, { decimals: 2 })} €</div>
+                  </div>
+                );
+              })}
+            </Card>
+          </div>
+        )}
+
+        {/* Actions — uniquement si en attente */}
+        {!isValidated && !isCancelled && (
+          <>
+            <div className="text-[13px] text-zinc-400 text-center py-2">
+              Avez-vous respecté ce Control. ?
+            </div>
+            <button
+              onClick={validate}
+              className="w-full bg-emerald-400 text-black font-semibold py-3.5 rounded-xl active:scale-[0.98] transition-transform flex items-center justify-center gap-2"
+            >
+              <Check className="w-4 h-4" strokeWidth={3} /> Valider — créer les dépenses
+            </button>
+            <button
+              onClick={() => { onClose(); onEdit && onEdit(control); }}
+              className="w-full bg-[#2C2C2E] text-white font-semibold py-3.5 rounded-xl active:scale-[0.98] transition-transform flex items-center justify-center gap-2"
+            >
+              <Edit3 className="w-4 h-4" /> Modifier
+            </button>
+            <button
+              onClick={cancel}
+              className="w-full text-rose-400 text-[14px] font-medium py-2"
+            >
+              Annuler ce Control.
+            </button>
+          </>
+        )}
+
+        {(isValidated || isCancelled) && (
+          <button
+            onClick={() => {
+              setState(s => ({ ...s, controls: (s.controls || []).filter(c => c.id !== control.id) }));
+              onClose();
+            }}
+            className="w-full text-zinc-500 text-[13px] font-medium py-2"
+          >
+            Supprimer de l'historique
+          </button>
+        )}
+      </div>
+    </Sheet>
+  );
+};
+
+const ControlsPage = ({ state, setState }) => {
+  const [editControl, setEditControl] = useState(null);
+  const [viewControl, setViewControl] = useState(null);
+
+  const controls = state.controls || [];
+
+  // Groupes : à venir / passés non validés / historique
+  const now = new Date();
+  const groups = useMemo(() => {
+    const upcoming = [];
+    const pastPending = [];
+    const archive = [];
+    controls.forEach(c => {
+      const d = new Date(c.date);
+      if (c.status === 'validated' || c.status === 'cancelled') {
+        archive.push(c);
+      } else if (d >= new Date(now.getFullYear(), now.getMonth(), now.getDate())) {
+        upcoming.push(c);
+      } else {
+        pastPending.push(c);
+      }
+    });
+    upcoming.sort((a, b) => new Date(a.date) - new Date(b.date));
+    pastPending.sort((a, b) => new Date(b.date) - new Date(a.date));
+    archive.sort((a, b) => new Date(b.date) - new Date(a.date));
+    return { upcoming, pastPending, archive };
+  }, [controls]);
+
+  const ControlRow = ({ c }) => {
+    const total = (c.items || []).reduce((s, it) => s + Number(it.amount || 0), 0);
+    const d = new Date(c.date);
+    return (
+      <button
+        onClick={() => setViewControl(c)}
+        className="w-full flex items-center justify-between p-4 active:bg-[#252527] text-left"
+      >
+        <div className="flex items-center gap-3 min-w-0 flex-1">
+          <div className={`w-9 h-9 rounded-2xl flex items-center justify-center flex-shrink-0 ${
+            c.status === 'validated' ? 'bg-emerald-500/15' :
+            c.status === 'cancelled' ? 'bg-zinc-800' :
+            'bg-indigo-500/15'
+          }`}>
+            {c.status === 'validated' ? <Check className="w-4 h-4 text-emerald-400" strokeWidth={3} /> :
+             c.status === 'cancelled' ? <X className="w-4 h-4 text-zinc-500" /> :
+             <Target className="w-4 h-4 text-indigo-400" />}
+          </div>
+          <div className="min-w-0 flex-1">
+            <div className="text-[14px] font-semibold text-white truncate">{c.name || 'Sans nom'}</div>
+            <div className="text-[11px] text-zinc-500 mt-0.5">
+              {d.toLocaleDateString('fr-FR', { day: '2-digit', month: 'short' })}
+              {c.time ? ` · ${c.time}` : ''}
+              {(c.items || []).length > 0 && ` · ${c.items.length} item${c.items.length > 1 ? 's' : ''}`}
+            </div>
+          </div>
+        </div>
+        <div className="text-right flex-shrink-0">
+          <div className={`text-[14px] font-bold ${c.status === 'cancelled' ? 'text-zinc-500 line-through' : 'text-white'}`}>
+            {fmt(total, { decimals: 0 })} €
+          </div>
+        </div>
+      </button>
+    );
+  };
+
+  return (
+    <div className="pb-32">
+      <TopBar subtitle="Projections" title="Control." />
+
+      <div className="px-5">
+        <button
+          onClick={() => setEditControl({ id: 'new' })}
+          className="w-full mb-5 bg-white text-black font-semibold py-3.5 rounded-xl flex items-center justify-center gap-2 active:scale-[0.98] transition-transform"
+        >
+          <Plus className="w-4 h-4" /> Créer un Control.
+        </button>
+
+        {controls.length === 0 && (
+          <div className="text-center py-12">
+            <div className="w-14 h-14 rounded-2xl bg-indigo-500/10 flex items-center justify-center mx-auto mb-4">
+              <Target className="w-6 h-6 text-indigo-400" />
+            </div>
+            <div className="text-[15px] font-semibold text-white mb-1.5">Anticipe tes dépenses</div>
+            <div className="text-[12.5px] text-zinc-500 leading-relaxed px-4">
+              Crée un Control. pour prévoir une sortie, un week-end, un achat.<br />
+              Visualise l'impact sur ton budget avant de t'engager.
+            </div>
+          </div>
+        )}
+
+        {groups.upcoming.length > 0 && (
+          <div className="mb-5">
+            <div className="text-[11px] uppercase tracking-wider font-semibold text-zinc-500 mb-2 px-1">
+              À venir <span className="text-zinc-600">· {groups.upcoming.length}</span>
+            </div>
+            <Card>
+              {groups.upcoming.map((c, i) => (
+                <div key={c.id} className={i < groups.upcoming.length - 1 ? 'border-b border-zinc-800/60' : ''}>
+                  <ControlRow c={c} />
+                </div>
+              ))}
+            </Card>
+          </div>
+        )}
+
+        {groups.pastPending.length > 0 && (
+          <div className="mb-5">
+            <div className="text-[11px] uppercase tracking-wider font-semibold text-orange-400/80 mb-2 px-1 flex items-center gap-1">
+              <AlertCircle className="w-3 h-3" /> À valider <span className="text-zinc-600 normal-case">· passés</span>
+            </div>
+            <Card>
+              {groups.pastPending.map((c, i) => (
+                <div key={c.id} className={i < groups.pastPending.length - 1 ? 'border-b border-zinc-800/60' : ''}>
+                  <ControlRow c={c} />
+                </div>
+              ))}
+            </Card>
+          </div>
+        )}
+
+        {groups.archive.length > 0 && (
+          <div className="mb-5">
+            <div className="text-[11px] uppercase tracking-wider font-semibold text-zinc-500 mb-2 px-1">
+              Historique
+            </div>
+            <Card>
+              {groups.archive.slice(0, 20).map((c, i) => (
+                <div key={c.id} className={i < Math.min(groups.archive.length, 20) - 1 ? 'border-b border-zinc-800/60' : ''}>
+                  <ControlRow c={c} />
+                </div>
+              ))}
+            </Card>
+          </div>
+        )}
+      </div>
+
+      <ControlEditor control={editControl} state={state} setState={setState} onClose={() => setEditControl(null)} />
+      <ControlValidationSheet
+        control={viewControl}
+        state={state}
+        setState={setState}
+        onClose={() => setViewControl(null)}
+        onEdit={(c) => setEditControl(c)}
+      />
+    </div>
+  );
+};
+
+// ---------------------------------------------------------------------------
+// Export — fonctionnalité d'export CSV des données financières
+// ---------------------------------------------------------------------------
+
+const downloadFile = (filename, content, type = 'text/csv;charset=utf-8;') => {
+  const blob = new Blob(['\uFEFF' + content], { type }); // BOM UTF-8 pour Excel
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 200);
+};
+
+const csvEscape = (v) => {
+  if (v === null || v === undefined) return '';
+  const s = String(v);
+  if (s.includes(';') || s.includes('"') || s.includes('\n')) {
+    return `"${s.replace(/"/g, '""')}"`;
+  }
+  return s;
+};
+const toCSV = (rows) => rows.map(r => r.map(csvEscape).join(';')).join('\n');
+
+const ExportSheet = ({ open, onClose, state }) => {
+  const [year, setYear] = useState(new Date().getFullYear());
+  const [msg, setMsg] = useState(null);
+
+  const activityMap = useMemo(() => {
+    const m = {};
+    state.activities.forEach(a => { m[a.id] = a; });
+    return m;
+  }, [state.activities]);
+  const clientMap = useMemo(() => {
+    const m = {};
+    (state.clients || []).forEach(c => { m[c.id] = c; });
+    return m;
+  }, [state.clients]);
+  const varCatMap = useMemo(() => {
+    const m = {};
+    (state.varCategories || []).forEach(c => { m[c.id] = c; });
+    return m;
+  }, [state.varCategories]);
+  const catMap = useMemo(() => {
+    const m = {};
+    state.categories.forEach(c => { m[c.id] = c; });
+    return m;
+  }, [state.categories]);
+
+  const exportRevenues = () => {
+    const rows = [['Date', 'Activité', 'Client', 'Montant (€)', 'Description', 'Soumis URSSAF']];
+    state.transactions
+      .filter(t => new Date(t.date).getFullYear() === year)
+      .sort((a, b) => new Date(a.date) - new Date(b.date))
+      .forEach(t => {
+        const a = activityMap[t.activityId];
+        const c = t.clientId ? clientMap[t.clientId] : null;
+        rows.push([
+          t.date,
+          a?.name || '',
+          c?.name || '',
+          Number(t.amount || 0).toFixed(2).replace('.', ','),
+          t.description || '',
+          a?.taxable ? 'Oui' : 'Non',
+        ]);
+      });
+    downloadFile(`control-revenus-${year}.csv`, toCSV(rows));
+    setMsg({ type: 'ok', text: `Revenus ${year} exportés.` });
+    setTimeout(() => setMsg(null), 2500);
+  };
+
+  const exportExpenses = () => {
+    const rows = [['Date', 'Catégorie', 'Description', 'Montant (€)']];
+    (state.varExpenses || [])
+      .filter(e => new Date(e.date).getFullYear() === year)
+      .sort((a, b) => new Date(a.date) - new Date(b.date))
+      .forEach(e => {
+        const c = varCatMap[e.categoryId];
+        rows.push([
+          e.date,
+          c?.name || 'Autre',
+          e.description || '',
+          Number(e.amount || 0).toFixed(2).replace('.', ','),
+        ]);
+      });
+    downloadFile(`control-depenses-${year}.csv`, toCSV(rows));
+    setMsg({ type: 'ok', text: `Dépenses ${year} exportées.` });
+    setTimeout(() => setMsg(null), 2500);
+  };
+
+  const exportMonthly = () => {
+    const ursaffActive = state.settings.ursaffEnabled !== false;
+    const rows = [[
+      'Mois', 'Chiffre d\'affaires', 'CA URSSAF', 'Hors URSSAF',
+      ...(ursaffActive ? ['URSSAF dû'] : []),
+      'Charges fixes', 'Charges payées', 'Dépenses variables', 'Bénéfice', 'Argent disponible',
+    ]];
+    for (let m = 0; m < 12; m++) {
+      const d = computeMonth(state, year, m);
+      const v = computeVarMonth(state, year, m);
+      const benefice = d.brut - d.ursaff;
+      const dispo = benefice - d.chargesPaid - v.total;
+      const fmt2 = (n) => Number(n).toFixed(2).replace('.', ',');
+      rows.push([
+        MONTHS_FR[m],
+        fmt2(d.brut),
+        fmt2(d.brutTaxable),
+        fmt2(d.brutNonTaxable),
+        ...(ursaffActive ? [fmt2(d.ursaff)] : []),
+        fmt2(d.charges),
+        fmt2(d.chargesPaid),
+        fmt2(v.total),
+        fmt2(benefice),
+        fmt2(dispo),
+      ]);
+    }
+    downloadFile(`control-bilan-mensuel-${year}.csv`, toCSV(rows));
+    setMsg({ type: 'ok', text: `Bilan ${year} exporté.` });
+    setTimeout(() => setMsg(null), 2500);
+  };
+
+  const exportStats = () => {
+    const ursaffActive = state.settings.ursaffEnabled !== false;
+    // Synthèse globale + répartitions
+    const rows = [];
+    let totalBrut = 0, totalUrsaff = 0, totalCharges = 0, totalVar = 0;
+    for (let m = 0; m < 12; m++) {
+      const d = computeMonth(state, year, m);
+      const v = computeVarMonth(state, year, m);
+      totalBrut += d.brut; totalUrsaff += d.ursaff; totalCharges += d.charges; totalVar += v.total;
+    }
+    rows.push(['Bilan annuel', year]);
+    rows.push([]);
+    rows.push(['Indicateur', 'Valeur (€)']);
+    rows.push(['Chiffre d\'affaires', totalBrut.toFixed(2).replace('.', ',')]);
+    if (ursaffActive) rows.push(['URSSAF dû', totalUrsaff.toFixed(2).replace('.', ',')]);
+    rows.push(['Charges fixes (total)', totalCharges.toFixed(2).replace('.', ',')]);
+    rows.push(['Dépenses variables', totalVar.toFixed(2).replace('.', ',')]);
+    rows.push(['Bénéfice net', (totalBrut - totalUrsaff - totalCharges - totalVar).toFixed(2).replace('.', ',')]);
+    rows.push([]);
+    rows.push(['Par activité', '', '']);
+    rows.push(['Activité', 'CA (€)', '% du CA total']);
+    const byActivity = {};
+    state.transactions.forEach(t => {
+      if (new Date(t.date).getFullYear() === year) {
+        byActivity[t.activityId] = (byActivity[t.activityId] || 0) + Number(t.amount || 0);
+      }
+    });
+    Object.entries(byActivity).sort((a, b) => b[1] - a[1]).forEach(([aid, total]) => {
+      const a = activityMap[aid];
+      const pct = totalBrut > 0 ? (total / totalBrut * 100) : 0;
+      rows.push([a?.name || 'Inconnu', total.toFixed(2).replace('.', ','), pct.toFixed(1).replace('.', ',') + '%']);
+    });
+    rows.push([]);
+    rows.push(['Par client', '', '']);
+    rows.push(['Client', 'CA (€)', '% du CA total']);
+    const byClient = {};
+    state.transactions.forEach(t => {
+      if (new Date(t.date).getFullYear() === year && t.clientId) {
+        byClient[t.clientId] = (byClient[t.clientId] || 0) + Number(t.amount || 0);
+      }
+    });
+    Object.entries(byClient).sort((a, b) => b[1] - a[1]).forEach(([cid, total]) => {
+      const c = clientMap[cid];
+      const pct = totalBrut > 0 ? (total / totalBrut * 100) : 0;
+      rows.push([c?.name || 'Inconnu', total.toFixed(2).replace('.', ','), pct.toFixed(1).replace('.', ',') + '%']);
+    });
+    downloadFile(`control-statistiques-${year}.csv`, toCSV(rows));
+    setMsg({ type: 'ok', text: `Statistiques ${year} exportées.` });
+    setTimeout(() => setMsg(null), 2500);
+  };
+
+  const exportAll = () => {
+    exportRevenues();
+    setTimeout(() => exportExpenses(), 250);
+    setTimeout(() => exportMonthly(), 500);
+    setTimeout(() => exportStats(), 750);
+  };
+
+  const years = useMemo(() => {
+    const set = new Set([new Date().getFullYear()]);
+    state.transactions.forEach(t => set.add(new Date(t.date).getFullYear()));
+    (state.varExpenses || []).forEach(e => set.add(new Date(e.date).getFullYear()));
+    return [...set].sort((a, b) => b - a);
+  }, [state.transactions, state.varExpenses]);
+
+  return (
+    <Sheet open={open} onClose={onClose} title="Exporter mes données">
+      <div className="space-y-4">
+        <div>
+          <label className="text-[11px] uppercase tracking-wider text-zinc-500 font-medium">Année</label>
+          <div className="flex flex-wrap gap-2 mt-2">
+            {years.map(y => (
+              <button
+                key={y}
+                onClick={() => setYear(y)}
+                className={`px-3.5 py-1.5 rounded-full text-[12.5px] font-semibold transition-colors ${year === y ? 'bg-white text-black' : 'bg-[#2C2C2E] text-zinc-400'}`}
+              >
+                {y}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="text-[11px] text-zinc-500 leading-relaxed px-1">
+          Format CSV compatible Excel, Numbers et Google Sheets.
+        </div>
+
+        <div className="space-y-2">
+          <button onClick={exportRevenues} className="w-full flex items-center justify-between p-4 bg-[#1C1C1E] border border-zinc-800/60 rounded-2xl active:bg-[#252527]">
+            <div className="flex items-center gap-3">
+              <div className="w-8 h-8 rounded-xl bg-emerald-500/15 flex items-center justify-center">
+                <TrendingUp className="w-4 h-4 text-emerald-400" />
+              </div>
+              <div className="text-left">
+                <div className="text-[14px] font-semibold text-white">Revenus</div>
+                <div className="text-[11px] text-zinc-500">Toutes les ventes de {year}</div>
+              </div>
+            </div>
+            <Download className="w-4 h-4 text-zinc-500" />
+          </button>
+
+          <button onClick={exportExpenses} className="w-full flex items-center justify-between p-4 bg-[#1C1C1E] border border-zinc-800/60 rounded-2xl active:bg-[#252527]">
+            <div className="flex items-center gap-3">
+              <div className="w-8 h-8 rounded-xl bg-rose-500/15 flex items-center justify-center">
+                <ShoppingBag className="w-4 h-4 text-rose-400" />
+              </div>
+              <div className="text-left">
+                <div className="text-[14px] font-semibold text-white">Dépenses</div>
+                <div className="text-[11px] text-zinc-500">Toutes les dépenses variables de {year}</div>
+              </div>
+            </div>
+            <Download className="w-4 h-4 text-zinc-500" />
+          </button>
+
+          <button onClick={exportMonthly} className="w-full flex items-center justify-between p-4 bg-[#1C1C1E] border border-zinc-800/60 rounded-2xl active:bg-[#252527]">
+            <div className="flex items-center gap-3">
+              <div className="w-8 h-8 rounded-xl bg-blue-500/15 flex items-center justify-center">
+                <BarChart3 className="w-4 h-4 text-blue-400" />
+              </div>
+              <div className="text-left">
+                <div className="text-[14px] font-semibold text-white">Bilan mensuel</div>
+                <div className="text-[11px] text-zinc-500">12 mois · CA, charges, bénéfices</div>
+              </div>
+            </div>
+            <Download className="w-4 h-4 text-zinc-500" />
+          </button>
+
+          <button onClick={exportStats} className="w-full flex items-center justify-between p-4 bg-[#1C1C1E] border border-zinc-800/60 rounded-2xl active:bg-[#252527]">
+            <div className="flex items-center gap-3">
+              <div className="w-8 h-8 rounded-xl bg-indigo-500/15 flex items-center justify-center">
+                <Target className="w-4 h-4 text-indigo-400" />
+              </div>
+              <div className="text-left">
+                <div className="text-[14px] font-semibold text-white">Statistiques</div>
+                <div className="text-[11px] text-zinc-500">Synthèse + répartitions par activité et client</div>
+              </div>
+            </div>
+            <Download className="w-4 h-4 text-zinc-500" />
+          </button>
+        </div>
+
+        <button
+          onClick={exportAll}
+          className="w-full bg-white text-black font-semibold py-3.5 rounded-xl active:scale-[0.98] transition-transform flex items-center justify-center gap-2"
+        >
+          <Download className="w-4 h-4" /> Tout exporter
+        </button>
+
+        {msg && (
+          <div className={`px-4 py-3 rounded-xl text-[13px] font-medium ${msg.type === 'ok' ? 'bg-emerald-500/15 text-emerald-400' : 'bg-rose-500/15 text-rose-400'}`}>
+            {msg.text}
+          </div>
+        )}
+      </div>
+    </Sheet>
+  );
+};
+
+// ---------------------------------------------------------------------------
 // Profile page
 // ---------------------------------------------------------------------------
 
-const ProfilePage = ({ user, state, setState, onSignOut }) => {
+const ProfilePage = ({ user, state, setState, onSignOut, onExport }) => {
   const [editField, setEditField] = useState(null); // 'username'|'email'|'password'
   const [fieldValue, setFieldValue] = useState('');
   const [fieldValue2, setFieldValue2] = useState('');
@@ -3002,8 +4139,8 @@ const TabBar = ({ tab, setTab }) => {
   const tabs = [
     { id: 'dashboard',  label: 'Accueil',   icon: Home },
     { id: 'revenue',    label: 'Revenus',   icon: Wallet },
-    { id: 'expenses',   label: 'Charges',   icon: Receipt },
     { id: 'varexp',     label: 'Dépenses',  icon: ShoppingBag },
+    { id: 'controls',   label: 'Control.',  icon: Target },
     { id: 'year',       label: 'Année',     icon: BarChart3 },
     { id: 'profile',    label: 'Profil',    icon: User },
   ];
@@ -3056,10 +4193,18 @@ export default function App() {
   const [month, setMonthState] = useState(TODAY_MONTH);
   const [addOpen, setAddOpen] = useState(false);
   const [addVarOpen, setAddVarOpen] = useState(false);
+  const [exportOpen, setExportOpen] = useState(false);
   const [splashDone, setSplashDone] = useState(false);
   const prevUserRef = useRef(null);
 
   const setMonth = (y, m) => { setYearState(y); setMonthState(m); };
+
+  // Synchronise le flag global de décimales avec le setting utilisateur.
+  // Ce flag est lu par fmt() pour décider de l'affichage avec/sans décimales,
+  // ce qui propage instantanément le changement à tous les écrans.
+  useEffect(() => {
+    setShowDecimalsFlag(state.settings?.showDecimals !== false);
+  }, [state.settings?.showDecimals]);
 
   // Force le retour au dashboard à chaque connexion / inscription réussie
   useEffect(() => {
@@ -3116,9 +4261,10 @@ export default function App() {
           {tab === 'revenue'   && <RevenuePage state={state} setState={setState} year={year} month={month} setMonth={setMonth} openAddTx={() => setAddOpen(true)} />}
           {tab === 'expenses'  && <ExpensesPage state={state} setState={setState} year={year} month={month} setMonth={setMonth} />}
           {tab === 'varexp'    && <VarExpensesPage state={state} setState={setState} year={year} month={month} setMonth={setMonth} />}
+          {tab === 'controls'  && <ControlsPage state={state} setState={setState} />}
           {tab === 'year'      && <YearPage state={state} year={year} setMonth={setMonth} setTab={setTab} />}
-          {tab === 'profile'   && <ProfilePage user={user} state={state} setState={setState} onSignOut={signOut} />}
-          {tab === 'settings'  && <SettingsPage state={state} setState={setState} user={user} onSignOut={signOut} />}
+          {tab === 'profile'   && <ProfilePage user={user} state={state} setState={setState} onSignOut={signOut} onExport={() => setExportOpen(true)} />}
+          {tab === 'settings'  && <SettingsPage state={state} setState={setState} user={user} onSignOut={signOut} onExport={() => setExportOpen(true)} />}
         </div>
       </div>
 
@@ -3140,6 +4286,7 @@ export default function App() {
         defaultYear={year}
         defaultMonth={month}
       />
+      <ExportSheet open={exportOpen} onClose={() => setExportOpen(false)} state={state} />
     </div>
   );
 }
