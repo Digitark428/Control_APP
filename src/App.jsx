@@ -39,18 +39,17 @@ const TODAY_YEAR = TODAY.getFullYear();
 
 // Flag global pour le toggle "Afficher les décimales".
 // Maintenu en sync avec state.settings.showDecimals via useEffect dans App.
+// - ON  : tous les montants affichent 2 décimales (1 250,42 €)
+// - OFF : tous les montants affichent 0 décimale (1 250 €)
 // Les calculs sous-jacents restent toujours précis : seul l'affichage est concerné.
+// Le paramètre `decimals` des appelants est intentionnellement ignoré : ce sont les
+// préférences utilisateur qui priment, pas les choix locaux d'affichage.
 let __SHOW_DECIMALS__ = true;
 const setShowDecimalsFlag = (v) => { __SHOW_DECIMALS__ = v !== false; };
 
-const fmt = (n, opts = {}) => {
-  const { decimals } = opts;
+const fmt = (n) => {
   const v = Number(n) || 0;
-  // Si l'utilisateur a désactivé les décimales, on force 0 partout.
-  if (!__SHOW_DECIMALS__) {
-    return v.toLocaleString('fr-FR', { minimumFractionDigits: 0, maximumFractionDigits: 0 });
-  }
-  const d = decimals !== undefined ? decimals : (Math.abs(v) >= 1000 ? 0 : 2);
+  const d = __SHOW_DECIMALS__ ? 2 : 0;
   return v.toLocaleString('fr-FR', { minimumFractionDigits: d, maximumFractionDigits: d });
 };
 
@@ -641,6 +640,9 @@ const Dashboard = ({ state, setState, year, month, setMonth, openAddTx, openAddV
   // Détail des ventes par activité (sheet)
   const [activitySheet, setActivitySheet] = useState(null);
   const [controlSheet, setControlSheet] = useState(null); // Control. à valider
+  // "Mes activités" est replié par défaut pour alléger le dashboard ; l'utilisateur
+  // le déplie d'un tap sur le header pour voir le détail des activités.
+  const [activitiesOpen, setActivitiesOpen] = useState(false);
 
   // ── Suivi des dépenses du jour ──────────────────────────────────────────
   // Calcule le total des vraies dépenses (varExpenses) sur la journée en cours.
@@ -914,63 +916,6 @@ const Dashboard = ({ state, setState, year, month, setMonth, openAddTx, openAddV
         </Card>
       </div>
 
-      {/* ── ARGENT RÉELLEMENT DISPONIBLE (neutre) ────────────────────────── */}
-      <div className="px-5 mt-2 anim-4">
-        <div
-          className="rounded-3xl p-6 relative overflow-hidden"
-          style={{ background: 'linear-gradient(135deg, #1C1C1E 0%, #252527 100%)', border: '1px solid rgba(255,255,255,0.06)' }}
-        >
-          <div className="text-[11px] font-semibold tracking-[0.16em] uppercase text-zinc-500 mb-1">
-            Argent réellement disponible
-          </div>
-          <div className="flex items-baseline gap-2 mt-1">
-            <span className={`text-[52px] font-bold tracking-tight leading-none ${argentVrai >= 0 ? 'text-white' : 'text-rose-400'}`}>
-              {argentVrai >= 0 ? '+' : ''}{fmt(argentVrai, { decimals: 0 })}
-            </span>
-            <span className="text-2xl font-medium text-zinc-500">€</span>
-          </div>
-          <div className="text-[12px] mt-1.5 text-zinc-600">
-            bénéfice − charges payées − dépenses
-          </div>
-
-          <div className="mt-5 space-y-3">
-            <button
-              onClick={() => setTab('expenses')}
-              className="w-full flex items-center justify-between active:opacity-60 transition-opacity"
-            >
-              <div className="flex items-center gap-2.5">
-                <div className="w-7 h-7 rounded-xl bg-zinc-800/80 flex items-center justify-center">
-                  <Receipt className="w-3.5 h-3.5 text-zinc-400" />
-                </div>
-                <div className="text-left">
-                  <div className="text-[13px] font-medium text-zinc-200">Charges fixes</div>
-                  <div className="text-[10px] text-zinc-600">{chargesPaidCount}/{data.dueExpenses.length} payées</div>
-                </div>
-              </div>
-              <div className="text-right">
-                <div className="text-[14px] font-bold text-zinc-400">−{fmt(data.chargesPaid, { decimals: 0 })} €</div>
-                {chargesUnpaid > 0 && <div className="text-[10px] text-zinc-600">{fmt(chargesUnpaid, { decimals: 0 })} € restant</div>}
-              </div>
-            </button>
-            <button
-              onClick={() => setTab('varexp')}
-              className="w-full flex items-center justify-between active:opacity-60 transition-opacity"
-            >
-              <div className="flex items-center gap-2.5">
-                <div className="w-7 h-7 rounded-xl bg-zinc-800/80 flex items-center justify-center">
-                  <ShoppingBag className="w-3.5 h-3.5 text-zinc-400" />
-                </div>
-                <div className="text-left">
-                  <div className="text-[13px] font-medium text-zinc-200">Dépenses</div>
-                  <div className="text-[10px] text-zinc-600">{varData.items.length} opération{varData.items.length !== 1 ? 's' : ''}</div>
-                </div>
-              </div>
-              <div className="text-[14px] font-bold text-zinc-400">−{fmt(varData.total, { decimals: 0 })} €</div>
-            </button>
-          </div>
-        </div>
-      </div>
-
       {/* ── DÉCLARATION URSSAF ───────────────────────────────────────────── */}
       {state.settings.ursaffEnabled !== false && (
       <div className="px-5 mt-2 anim-4">
@@ -999,52 +944,67 @@ const Dashboard = ({ state, setState, year, month, setMonth, openAddTx, openAddV
       </div>
       )}
 
-      {/* ── ACTIVITÉS ────────────────────────────────────────────────────── */}
+      {/* ── ACTIVITÉS (repliable) ───────────────────────────────────────── */}
       <div className="px-5 mt-6 anim-5">
         <div className="flex items-center justify-between mb-3">
-          <h3 className="text-sm font-semibold text-white tracking-tight">Mes activités</h3>
+          <button
+            onClick={() => setActivitiesOpen(v => !v)}
+            className="flex items-center gap-2 active:opacity-60 transition-opacity"
+          >
+            <h3 className="text-sm font-semibold text-white tracking-tight">Mes activités</h3>
+            {activeActivities.length > 0 && (
+              <span className="text-[11px] text-zinc-500 font-medium">{activeActivities.length}</span>
+            )}
+            <ChevronRight
+              className="w-4 h-4 text-zinc-500 transition-transform"
+              strokeWidth={2.5}
+              style={{ transform: activitiesOpen ? 'rotate(90deg)' : 'rotate(0deg)' }}
+            />
+          </button>
           <button onClick={openAddTx} className="flex items-center gap-1.5 text-[13px] font-semibold text-emerald-400 active:opacity-60 bg-emerald-400/10 px-3 py-1.5 rounded-full">
             <Plus className="w-3.5 h-3.5" /> Ajouter
           </button>
         </div>
 
-        <div className="space-y-2">
-          {activeActivities.map(a => {
-            const d = data.byActivity[a.id] || { total: 0, count: 0 };
-            const pct = data.brut > 0 ? Math.min(100, (d.total / data.brut) * 100) : 0;
-            return (
-              <Card key={a.id} className="p-4" onClick={() => setActivitySheet(a)}>
-                <div className="flex items-center justify-between mb-2.5">
-                  <div className="flex items-center gap-2.5 min-w-0">
-                    <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: a.color }} />
-                    <div className="min-w-0">
-                      <div className="text-[14px] font-semibold text-white leading-tight truncate">{a.name}</div>
-                      <div className="text-[11px] text-zinc-500 mt-0.5">
-                        {d.count} {d.count > 1 ? 'ventes' : 'vente'}
-                        {!a.taxable && <span className="ml-1.5 px-1.5 py-px rounded-md bg-zinc-800 text-zinc-400 text-[9px] uppercase tracking-wider">non URSSAF</span>}
+        {activitiesOpen && (
+          <div className="space-y-2">
+            {activeActivities.map(a => {
+              const d = data.byActivity[a.id] || { total: 0, count: 0 };
+              const pct = data.brut > 0 ? Math.min(100, (d.total / data.brut) * 100) : 0;
+              return (
+                <Card key={a.id} className="p-4" onClick={() => setActivitySheet(a)}>
+                  <div className="flex items-center justify-between mb-2.5">
+                    <div className="flex items-center gap-2.5 min-w-0">
+                      <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: a.color }} />
+                      <div className="min-w-0">
+                        <div className="text-[14px] font-semibold text-white leading-tight truncate">{a.name}</div>
+                        <div className="text-[11px] text-zinc-500 mt-0.5">
+                          {d.count} {d.count > 1 ? 'ventes' : 'vente'}
+                          {!a.taxable && <span className="ml-1.5 px-1.5 py-px rounded-md bg-zinc-800 text-zinc-400 text-[9px] uppercase tracking-wider">non URSSAF</span>}
+                        </div>
                       </div>
                     </div>
+                    <div className="flex items-center gap-2 flex-shrink-0">
+                      <div className="text-[16px] font-bold text-white">{fmt(d.total, { decimals: 0 })} €</div>
+                      <ChevronRight className="w-4 h-4 text-zinc-600" strokeWidth={2.5} />
+                    </div>
                   </div>
-                  <div className="flex items-center gap-2 flex-shrink-0">
-                    <div className="text-[16px] font-bold text-white">{fmt(d.total, { decimals: 0 })} €</div>
-                    <ChevronRight className="w-4 h-4 text-zinc-600" strokeWidth={2.5} />
+                  <div className="h-1 bg-zinc-800 rounded-full overflow-hidden">
+                    <div
+                      className="h-full rounded-full transition-all duration-700"
+                      style={{ width: `${pct}%`, backgroundColor: a.color, opacity: d.total > 0 ? 1 : 0 }}
+                    />
                   </div>
-                </div>
-                <div className="h-1 bg-zinc-800 rounded-full overflow-hidden">
-                  <div
-                    className="h-full rounded-full transition-all duration-700"
-                    style={{ width: `${pct}%`, backgroundColor: a.color, opacity: d.total > 0 ? 1 : 0 }}
-                  />
-                </div>
+                </Card>
+              );
+            })}
+            {activeActivities.length === 0 && (
+              <Card className="p-4 text-center text-zinc-500 text-sm">
+                Aucune activité active. Va dans Réglages pour en créer.
               </Card>
-            );
-          })}
-          {activeActivities.length === 0 && (
-            <Card className="p-4 text-center text-zinc-500 text-sm">
-              Aucune activité active. Va dans Réglages pour en créer.
-            </Card>
-          )}
-        </div>
+            )}
+          </div>
+        )}
       </div>
 
       {/* ── 6 DERNIERS MOIS ──────────────────────────────────────────────── */}
@@ -1493,30 +1453,6 @@ const YearPage = ({ state, year, setMonth, setTab }) => {
           ) : (
             <div className="text-[13px] text-zinc-600 text-center py-2">Aucune dépense variable cette année.</div>
           )}
-        </Card>
-
-        <div className="text-[11px] uppercase tracking-wider font-semibold text-zinc-500 mb-2 px-1">Détail mensuel</div>
-        <Card>
-          {yearData.map((d, i) => (
-            <div
-              key={i}
-              onClick={() => { setMonth(year, d.month); setTab('dashboard'); }}
-              className={`flex items-center justify-between p-4 active:bg-[#252527] cursor-pointer ${i < 11 ? 'border-b border-zinc-800/60' : ''}`}
-            >
-              <div className="flex items-center gap-3">
-                <div className={`w-1.5 h-10 rounded-full ${d.net > 0 ? 'bg-emerald-400' : d.net < 0 ? 'bg-rose-400/40' : 'bg-zinc-700'}`} />
-                <div>
-                  <div className="text-[14px] font-semibold text-white">{MONTHS_FR[d.month]}</div>
-                  <div className="text-[11px] text-zinc-500">
-                    {fmt(d.brut, { decimals: 0 })} € brut · {fmt(d.charges, { decimals: 0 })} € charges
-                  </div>
-                </div>
-              </div>
-              <div className={`text-[14px] font-bold ${d.net >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
-                {d.net >= 0 ? '+' : ''}{fmt(d.net, { decimals: 0 })} €
-              </div>
-            </div>
-          ))}
         </Card>
 
         {/* ── PAR ACTIVITÉ ── */}
@@ -4139,6 +4075,7 @@ const TabBar = ({ tab, setTab }) => {
   const tabs = [
     { id: 'dashboard',  label: 'Accueil',   icon: Home },
     { id: 'revenue',    label: 'Revenus',   icon: Wallet },
+    { id: 'expenses',   label: 'Charges',   icon: Receipt },
     { id: 'varexp',     label: 'Dépenses',  icon: ShoppingBag },
     { id: 'controls',   label: 'Control.',  icon: Target },
     { id: 'year',       label: 'Année',     icon: BarChart3 },
@@ -4148,7 +4085,7 @@ const TabBar = ({ tab, setTab }) => {
   return (
     <div className="fixed bottom-0 left-0 right-0 z-40 flex justify-center px-4 pb-5 pt-3" style={{ pointerEvents: 'none' }}>
       <div
-        className="backdrop-blur-2xl rounded-full px-2 py-2 flex items-center gap-1"
+        className="backdrop-blur-2xl rounded-full px-1.5 py-2 flex items-center gap-0.5"
         style={{
           pointerEvents: 'auto',
           WebkitBackdropFilter: 'blur(24px) saturate(180%)',
@@ -4165,7 +4102,7 @@ const TabBar = ({ tab, setTab }) => {
             <button
               key={t.id}
               onClick={() => setTab(t.id)}
-              className={`flex items-center justify-center transition-all duration-200 ${active ? 'px-4 py-2.5 rounded-full' : 'p-2.5'}`}
+              className={`flex items-center justify-center transition-all duration-200 ${active ? 'px-3 py-2.5 rounded-full' : 'p-2'}`}
               style={active ? {
                 background: 'linear-gradient(180deg, #FAFAFA 0%, #C7C7CC 100%)',
                 boxShadow: '0 2px 12px -2px rgba(255,255,255,0.2), inset 0 1px 0 rgba(255,255,255,0.6)',
