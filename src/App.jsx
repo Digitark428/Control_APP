@@ -3888,12 +3888,21 @@ ${catRows ? `<h2>Dépenses par catégorie</h2><table>${catRows}</table>` : '<h2>
   Document généré le ${genDate} via Control.${userName ? ` pour ${esc(userName)}` : ''}.<br>
   Control. est un outil de suivi personnel à titre indicatif. Ce document ne constitue ni un document comptable officiel ni un conseil fiscal. Les montants reflètent uniquement les données saisies par l'utilisateur.
 </div>
-<script>window.onload=function(){setTimeout(function(){window.print()},350)}</script>
 </body></html>`;
 
-  const w = window.open('', '_blank');
-  if (!w) return false;
-  w.document.open(); w.document.write(html); w.document.close();
+  // Impression via iframe caché — évite le blocage des pop-ups (Safari/iOS)
+  const iframe = document.createElement('iframe');
+  iframe.style.cssText = 'position:fixed;right:0;bottom:0;width:0;height:0;border:0;';
+  document.body.appendChild(iframe);
+  const doc = iframe.contentWindow.document;
+  doc.open(); doc.write(html); doc.close();
+
+  const cleanup = () => { setTimeout(() => { try { document.body.removeChild(iframe); } catch {} }, 1000); };
+  iframe.contentWindow.onafterprint = cleanup;
+  setTimeout(() => {
+    try { iframe.contentWindow.focus(); iframe.contentWindow.print(); }
+    catch { cleanup(); return; }
+  }, 450);
   return true;
 };
 
@@ -4055,9 +4064,8 @@ const ExportSheet = ({ open, onClose, state }) => {
   };
 
   const exportPDF = () => {
-    const ok = generateMonthlyPDF(state, year, pdfMonth);
-    if (ok) { setMsg({ type: 'ok', text: `Rapport ${MONTHS_FR[pdfMonth]} ${year} prêt.` }); }
-    else { setMsg({ type: 'err', text: 'Autorise les fenêtres pop-up pour générer le PDF.' }); }
+    generateMonthlyPDF(state, year, pdfMonth);
+    setMsg({ type: 'ok', text: `Rapport ${MONTHS_FR[pdfMonth]} ${year} prêt.` });
     setTimeout(() => setMsg(null), 3500);
   };
 
