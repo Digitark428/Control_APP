@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { LegalModal } from './Legal'
 
 /* ─────────────────────────────────────────────────────────────
    Control. — AuthScreen
@@ -95,12 +96,15 @@ export default function AuthScreen({ onAuth }) {
   const [username, setUsername]   = useState('')
   const [loading, setLoading]     = useState(false)
   const [error, setError]         = useState('')
+  const [consent, setConsent]     = useState(false)   // acceptation CGU + confidentialité
+  const [legalDoc, setLegalDoc]   = useState(null)    // 'cgu' | 'privacy' | null
 
   const handleSubmit = async () => {
     setError('')
     if (!email || !password) { setError('Email et mot de passe requis.'); return }
     if (mode === 'signup' && (!firstName || !username)) { setError('Prénom et pseudo requis.'); return }
     if (mode === 'signup' && password.length < 6) { setError('Mot de passe : 6 caractères minimum.'); return }
+    if (mode === 'signup' && !consent) { setError('Veuillez accepter les conditions pour continuer.'); return }
 
     setLoading(true)
     const ok = await onAuth(mode, { email, password, firstName, username })
@@ -194,6 +198,46 @@ export default function AuthScreen({ onAuth }) {
             <Field icon={<IcLock/>} type="password" value={password} onChange={setPassword} placeholder="Mot de passe"   autoComplete={mode === 'login' ? 'current-password' : 'new-password'} />
           </div>
 
+          {/* ── Consentement CGU + confidentialité (inscription) ── */}
+          {mode === 'signup' && (
+            <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10, marginTop: 16 }}>
+              <button
+                type="button"
+                onClick={() => setConsent(v => !v)}
+                aria-label="Accepter les conditions"
+                style={{
+                  flexShrink: 0,
+                  width: 22, height: 22, marginTop: 1,
+                  borderRadius: 7,
+                  border: consent ? 'none' : '1.5px solid rgba(255,255,255,0.25)',
+                  background: consent ? 'linear-gradient(180deg, #FAFAFA 0%, #C7C7CC 100%)' : 'transparent',
+                  cursor: 'pointer',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  transition: 'all .15s',
+                }}
+              >
+                {consent && (
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#000" strokeWidth="3.5" strokeLinecap="round" strokeLinejoin="round">
+                    <polyline points="20 6 9 17 4 12" />
+                  </svg>
+                )}
+              </button>
+              <p style={{ fontSize: 12.5, lineHeight: 1.45, color: '#8E8E93', margin: 0, letterSpacing: '-0.1px' }}>
+                J'accepte les{' '}
+                <button type="button" onClick={() => setLegalDoc('cgu')}
+                  style={{ color: '#E5E5EA', fontWeight: 600, background: 'none', border: 'none', padding: 0, cursor: 'pointer', textDecoration: 'underline', fontSize: 12.5 }}>
+                  conditions d'utilisation
+                </button>
+                {' '}et la{' '}
+                <button type="button" onClick={() => setLegalDoc('privacy')}
+                  style={{ color: '#E5E5EA', fontWeight: 600, background: 'none', border: 'none', padding: 0, cursor: 'pointer', textDecoration: 'underline', fontSize: 12.5 }}>
+                  politique de confidentialité
+                </button>
+                .
+              </p>
+            </div>
+          )}
+
           {error && (
             <div style={{
               marginTop: 14,
@@ -212,8 +256,8 @@ export default function AuthScreen({ onAuth }) {
 
           <button
             onClick={handleSubmit}
-            disabled={loading}
-            style={{ ...btnPrimary, marginTop: 18, opacity: loading ? 0.7 : 1 }}
+            disabled={loading || (mode === 'signup' && !consent)}
+            style={{ ...btnPrimary, marginTop: 18, opacity: (loading || (mode === 'signup' && !consent)) ? 0.55 : 1 }}
           >
             {loading
               ? <span style={{ display: 'inline-block', width: 18, height: 18, border: '2px solid rgba(0,0,0,0.25)', borderTopColor: '#000', borderRadius: '50%', animation: 'spin 0.7s linear infinite' }}/>
@@ -235,6 +279,8 @@ export default function AuthScreen({ onAuth }) {
           </button>
         </div>
       </div>
+
+      <LegalModal doc={legalDoc} onClose={() => setLegalDoc(null)} />
     </div>
   )
 }

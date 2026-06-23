@@ -1,9 +1,10 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { loadState, saveState } from './lib/db';
+import { loadState, saveState, deleteAccountData } from './lib/db';
 import { supabase } from './lib/supabase';
 import AuthScreen from './components/AuthScreen';
 import SplashScreen from './components/SplashScreen';
-import { Plus, ChevronLeft, ChevronRight, X, Trash2, Wallet, Edit3, Check, Home, BarChart3, Receipt, Sliders, AlertCircle, Power, Bell, Clock, FileText, EyeOff, ShoppingBag, User, TrendingUp, Users, Camera, Lock, Mail, Target, Download, AlertTriangle, Calendar } from 'lucide-react';
+import { LegalModal } from './components/Legal';
+import { Plus, ChevronLeft, ChevronRight, X, Trash2, Wallet, Edit3, Check, Home, BarChart3, Receipt, Sliders, AlertCircle, Power, Bell, Clock, FileText, EyeOff, ShoppingBag, User, TrendingUp, Users, Camera, Lock, Mail, Target, Download, AlertTriangle, Calendar, Shield, ScrollText } from 'lucide-react';
 
 // ---------------------------------------------------------------------------
 // Constants & defaults
@@ -234,7 +235,7 @@ const useAppState = (user) => {
     return () => { if (saveTimer.current) clearTimeout(saveTimer.current); };
   }, [state, synced, user]);
 
-  return [state, setState];
+  return [state, setState, synced];
 };
 
 // ---------------------------------------------------------------------------
@@ -624,12 +625,10 @@ const Dashboard = ({ state, setState, year, month, setMonth, openAddTx, openAddV
       let m = month - i, y = year;
       while (m < 0) { m += 12; y -= 1; }
       const d = computeMonth(state, y, m);
-      arr.push({ month: m, year: y, net: d.net });
+      arr.push({ month: m, year: y, net: d.net, brut: d.brut });
     }
     return arr;
   }, [state, year, month]);
-
-  const maxAbsNet = Math.max(1, ...last6.map(d => Math.abs(d.net)));
 
   const benefice = data.brut - data.ursaff;
   const argentVrai = benefice - data.chargesPaid - varData.total;
@@ -736,21 +735,27 @@ const Dashboard = ({ state, setState, year, month, setMonth, openAddTx, openAddV
             {todayControls.length > 0 && (() => {
               const c = todayControls[0];
               const total = (c.items || []).reduce((s, it) => s + Number(it.amount || 0), 0);
+              const isIncome = (c.kind || 'expense') === 'income';
+              const palette = isIncome
+                ? { bg: 'rgba(48,209,88,0.10)', bg2: 'rgba(48,209,88,0.04)', border: 'rgba(48,209,88,0.20)', label: 'text-emerald-400/80', sub: 'text-emerald-300/70' }
+                : { bg: 'rgba(94,92,230,0.10)', bg2: 'rgba(94,92,230,0.04)', border: 'rgba(94,92,230,0.18)', label: 'text-indigo-400/80', sub: 'text-indigo-300/70' };
               return (
                 <button
                   onClick={() => setControlSheet(c)}
                   className={`${todayExpenses > 0 ? 'flex-1' : 'w-full'} text-left rounded-2xl p-3.5 active:scale-[0.98] transition-transform`}
                   style={{
-                    background: 'linear-gradient(135deg, rgba(94,92,230,0.10) 0%, rgba(94,92,230,0.04) 100%)',
-                    border: '1px solid rgba(94,92,230,0.18)',
+                    background: `linear-gradient(135deg, ${palette.bg} 0%, ${palette.bg2} 100%)`,
+                    border: `1px solid ${palette.border}`,
                   }}
                 >
-                  <div className="text-[10px] uppercase tracking-wider text-indigo-400/80 font-semibold mb-0.5 flex items-center gap-1">
-                    <Clock className="w-2.5 h-2.5" />
-                    Control. {c.time ? `· ${c.time}` : ''}
+                  <div className={`text-[10px] uppercase tracking-wider ${palette.label} font-semibold mb-0.5 flex items-center gap-1`}>
+                    {isIncome ? <TrendingUp className="w-2.5 h-2.5" /> : <Clock className="w-2.5 h-2.5" />}
+                    Control. {isIncome ? 'revenu' : ''}{c.time ? ` · ${c.time}` : ''}
                   </div>
                   <div className="text-[13px] font-bold text-white truncate leading-tight">{c.name || 'Sans nom'}</div>
-                  <div className="text-[11px] text-indigo-300/70 mt-0.5">{fmt(total, { decimals: 0 })} € prévus</div>
+                  <div className={`text-[11px] ${palette.sub} mt-0.5`}>
+                    {isIncome ? '+' : ''}{fmt(total, { decimals: 0 })} € {isIncome ? 'attendus' : 'prévus'}
+                  </div>
                 </button>
               );
             })()}
@@ -1007,32 +1012,102 @@ const Dashboard = ({ state, setState, year, month, setMonth, openAddTx, openAddV
         )}
       </div>
 
-      {/* ── 6 DERNIERS MOIS ──────────────────────────────────────────────── */}
+      {/* ── 6 DERNIERS MOIS — ÉVOLUTION DU CA ────────────────────────────── */}
       <div className="px-5 mt-6 anim-6">
-        <h3 className="text-sm font-semibold text-white mb-3 tracking-tight">6 derniers mois</h3>
+        <div className="flex items-center justify-between mb-3">
+          <h3 className="text-sm font-semibold text-white tracking-tight">Évolution du CA</h3>
+          {(() => {
+            // Tendance : compare le dernier mois au mois précédent
+            const cur = last6[last6.length - 1]?.brut || 0;
+            const prev = last6[last6.length - 2]?.brut || 0;
+            if (prev === 0 && cur === 0) return null;
+            const diff = cur - prev;
+            const pct = prev > 0 ? (diff / prev) * 100 : (cur > 0 ? 100 : 0);
+            const up = diff >= 0;
+            return (
+              <div className={`flex items-center gap-1 text-[12px] font-semibold ${up ? 'text-emerald-400' : 'text-rose-400'}`}>
+                <TrendingUp className="w-3.5 h-3.5" style={{ transform: up ? 'none' : 'scaleY(-1)' }} />
+                {up ? '+' : ''}{pct.toFixed(0)}%
+              </div>
+            );
+          })()}
+        </div>
         <Card className="p-5">
-          <div className="flex items-end justify-between gap-1.5 h-32">
-            {last6.map((d, i) => {
-              const h = (Math.abs(d.net) / maxAbsNet) * 100;
-              const isCurrent = d.year === year && d.month === month;
-              const positive = d.net >= 0;
-              return (
-                <div key={i} className="flex-1 flex flex-col items-center justify-end gap-2">
-                  <div className="w-full flex flex-col items-center justify-end" style={{ height: '100%' }}>
-                    <div
-                      className={`w-full rounded-lg transition-all duration-700 ${isCurrent
-                        ? (positive ? 'bg-emerald-400' : 'bg-rose-400')
-                        : (positive ? 'bg-emerald-400/25' : 'bg-rose-400/25')}`}
-                      style={{ height: `${Math.max(4, h)}%`, minHeight: '4px' }}
-                    />
-                  </div>
-                  <div className={`text-[10px] font-medium ${isCurrent ? 'text-white' : 'text-zinc-600'}`}>
-                    {MONTHS_SHORT[d.month]}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
+          {(() => {
+            const W = 320, H = 130, padX = 6, padTop = 14, padBottom = 22;
+            const vals = last6.map(d => d.brut);
+            const maxV = Math.max(1, ...vals);
+            const minV = Math.min(...vals);
+            const range = Math.max(1, maxV - minV);
+            const innerH = H - padTop - padBottom;
+            const stepX = (W - padX * 2) / Math.max(1, last6.length - 1);
+
+            // Points (x,y). On laisse un petit "fond" sous la courbe : si tout est
+            // identique, la ligne reste horizontale au milieu.
+            const pts = last6.map((d, i) => {
+              const x = padX + i * stepX;
+              const ratio = maxV === minV ? 0.5 : (d.brut - minV) / range;
+              const y = padTop + innerH * (1 - ratio);
+              return { x, y, d };
+            });
+
+            // Courbe lissée (Catmull-Rom → Bézier) pour un rendu Apple-like
+            const linePath = pts.map((p, i) => {
+              if (i === 0) return `M ${p.x},${p.y}`;
+              const p0 = pts[i - 1];
+              const cx = (p0.x + p.x) / 2;
+              return `C ${cx},${p0.y} ${cx},${p.y} ${p.x},${p.y}`;
+            }).join(' ');
+            const areaPath = `${linePath} L ${pts[pts.length - 1].x},${padTop + innerH} L ${pts[0].x},${padTop + innerH} Z`;
+            const last = pts[pts.length - 1];
+
+            return (
+              <svg viewBox={`0 0 ${W} ${H}`} className="w-full" style={{ overflow: 'visible' }}>
+                <defs>
+                  <linearGradient id="caArea" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stopColor="rgba(48,209,88,0.28)" />
+                    <stop offset="100%" stopColor="rgba(48,209,88,0)" />
+                  </linearGradient>
+                  <linearGradient id="caLine" x1="0" y1="0" x2="1" y2="0">
+                    <stop offset="0%" stopColor="#34D399" />
+                    <stop offset="100%" stopColor="#30D158" />
+                  </linearGradient>
+                </defs>
+
+                {/* Aire sous la courbe */}
+                <path d={areaPath} fill="url(#caArea)" />
+                {/* Ligne */}
+                <path d={linePath} fill="none" stroke="url(#caLine)" strokeWidth="2.5"
+                  strokeLinecap="round" strokeLinejoin="round" />
+
+                {/* Points + labels */}
+                {pts.map((p, i) => {
+                  const isLast = i === pts.length - 1;
+                  return (
+                    <g key={i}>
+                      <circle cx={p.x} cy={p.y} r={isLast ? 4 : 2.5}
+                        fill={isLast ? '#30D158' : '#1C1C1E'}
+                        stroke={isLast ? '#0A0A0A' : '#30D158'}
+                        strokeWidth={isLast ? 2 : 1.5} />
+                      {/* Valeur du dernier point */}
+                      {isLast && p.d.brut > 0 && (
+                        <text x={p.x} y={p.y - 10} textAnchor="middle"
+                          fill="#FFFFFF" fontSize="11" fontWeight="700">
+                          {fmt(p.d.brut, { decimals: 0 })}€
+                        </text>
+                      )}
+                      {/* Mois en bas */}
+                      <text x={p.x} y={H - 4} textAnchor="middle"
+                        fill={isLast ? '#FFFFFF' : '#52525B'} fontSize="10"
+                        fontWeight={isLast ? '600' : '500'}>
+                        {MONTHS_SHORT[p.d.month]}
+                      </text>
+                    </g>
+                  );
+                })}
+              </svg>
+            );
+          })()}
         </Card>
       </div>
 
@@ -1045,6 +1120,15 @@ const Dashboard = ({ state, setState, year, month, setMonth, openAddTx, openAddV
         openAddTx={openAddTx}
         onClose={() => setActivitySheet(null)}
       />
+
+      {/* Validation d'un Control. ouvert depuis la carte du dashboard */}
+      <ControlValidationSheet
+        control={controlSheet}
+        state={state}
+        setState={setState}
+        onClose={() => setControlSheet(null)}
+        onEdit={null}
+      />
     </div>
   );
 };
@@ -1055,6 +1139,15 @@ const Dashboard = ({ state, setState, year, month, setMonth, openAddTx, openAddV
 
 const RevenuePage = ({ state, setState, year, month, setMonth, openAddTx }) => {
   const data = useMemo(() => computeMonth(state, year, month), [state, year, month]);
+  // Activités repliées par défaut : on stocke les ids dépliés dans un Set.
+  const [expanded, setExpanded] = useState(() => new Set());
+  const toggleActivity = (id) => {
+    setExpanded(prev => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  };
   const visibleActivities = useMemo(() =>
     [...state.activities].sort((a, b) => a.order - b.order),
     [state.activities]);
@@ -1112,47 +1205,63 @@ const RevenuePage = ({ state, setState, year, month, setMonth, openAddTx }) => {
           const txs = data.txs.filter(t => t.activityId === a.id);
           if (txs.length === 0) return null;
           const total = txs.reduce((s, t) => s + Number(t.amount || 0), 0);
+          const isOpen = expanded.has(a.id);
           return (
-            <div key={a.id} className="mb-5">
-              <div className="flex items-center justify-between mb-2 px-1">
-                <div className="flex items-center gap-2 min-w-0">
+            <div key={a.id} className="mb-3">
+              {/* Header cliquable — replie/déplie le détail des ventes */}
+              <button
+                onClick={() => toggleActivity(a.id)}
+                className="w-full flex items-center justify-between p-4 rounded-2xl bg-[#1C1C1E] border border-zinc-800/60 active:bg-[#252527] transition-colors"
+              >
+                <div className="flex items-center gap-2.5 min-w-0">
+                  <ChevronRight
+                    className="w-4 h-4 text-zinc-500 flex-shrink-0 transition-transform"
+                    strokeWidth={2.5}
+                    style={{ transform: isOpen ? 'rotate(90deg)' : 'rotate(0deg)' }}
+                  />
                   <div className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: a.color }} />
-                  <span className="text-[13px] font-semibold text-white uppercase tracking-wider truncate">{a.name}</span>
+                  <span className="text-[14px] font-semibold text-white truncate">{a.name}</span>
                   {a.active === false && <EyeOff className="w-3 h-3 text-zinc-600 flex-shrink-0" />}
                   {!a.taxable && <span className="px-1.5 py-px rounded bg-zinc-800 text-zinc-400 text-[9px] uppercase tracking-wider flex-shrink-0">non URSSAF</span>}
                 </div>
-                <span className="text-[13px] font-bold text-white">{fmt(total, { decimals: 2 })} €</span>
-              </div>
-              <Card>
-                {txs.map((t, i) => {
-                  const client = t.clientId ? clientMap[t.clientId] : null;
-                  return (
-                  <div key={t.id} className={`flex items-center justify-between p-4 ${i < txs.length - 1 ? 'border-b border-zinc-800/60' : ''}`}>
-                    <div className="flex-1 min-w-0 pr-3">
-                      <div className="text-[14px] font-medium text-white truncate">{t.description || 'Sans description'}</div>
-                      <div className="text-[11px] text-zinc-500 mt-0.5 flex items-center gap-2">
-                        <span>{new Date(t.date).toLocaleDateString('fr-FR', { day: '2-digit', month: 'short' })}</span>
-                        {client && (
-                          <>
-                            <span className="text-zinc-700">·</span>
-                            <span className="flex items-center gap-1 truncate">
-                              <Users className="w-2.5 h-2.5" />
-                              <span className="truncate">{client.name}</span>
-                            </span>
-                          </>
-                        )}
+                <div className="flex items-center gap-2 flex-shrink-0">
+                  <span className="text-[14px] font-bold text-white">{fmt(total, { decimals: 2 })} €</span>
+                  <span className="text-[11px] text-zinc-600">{txs.length}</span>
+                </div>
+              </button>
+
+              {isOpen && (
+                <Card className="mt-2">
+                  {txs.map((t, i) => {
+                    const client = t.clientId ? clientMap[t.clientId] : null;
+                    return (
+                    <div key={t.id} className={`flex items-center justify-between p-4 ${i < txs.length - 1 ? 'border-b border-zinc-800/60' : ''}`}>
+                      <div className="flex-1 min-w-0 pr-3">
+                        <div className="text-[14px] font-medium text-white truncate">{t.description || 'Sans description'}</div>
+                        <div className="text-[11px] text-zinc-500 mt-0.5 flex items-center gap-2">
+                          <span>{new Date(t.date).toLocaleDateString('fr-FR', { day: '2-digit', month: 'short' })}</span>
+                          {client && (
+                            <>
+                              <span className="text-zinc-700">·</span>
+                              <span className="flex items-center gap-1 truncate">
+                                <Users className="w-2.5 h-2.5" />
+                                <span className="truncate">{client.name}</span>
+                              </span>
+                            </>
+                          )}
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-3">
+                        <div className="text-[14px] font-semibold text-white">{fmt(t.amount, { decimals: 2 })} €</div>
+                        <button onClick={() => deleteTx(t.id)} className="text-zinc-600 active:text-rose-400 transition-colors">
+                          <Trash2 className="w-4 h-4" />
+                        </button>
                       </div>
                     </div>
-                    <div className="flex items-center gap-3">
-                      <div className="text-[14px] font-semibold text-white">{fmt(t.amount, { decimals: 2 })} €</div>
-                      <button onClick={() => deleteTx(t.id)} className="text-zinc-600 active:text-rose-400 transition-colors">
-                        <Trash2 className="w-4 h-4" />
-                      </button>
-                    </div>
-                  </div>
-                  );
-                })}
-              </Card>
+                    );
+                  })}
+                </Card>
+              )}
             </div>
           );
         })}
@@ -1303,11 +1412,20 @@ const ExpensesPage = ({ state, setState, year, month, setMonth }) => {
 // ---------------------------------------------------------------------------
 
 const YearPage = ({ state, year, setMonth, setTab }) => {
+  // Pour l'année en cours, on n'agrège que jusqu'au mois actuel afin de ne pas
+  // gonfler artificiellement les charges fixes récurrentes des mois futurs
+  // (qui ne sont pas encore "dues" du point de vue financier réel).
+  // Pour une année passée, on agrège les 12 mois normalement.
+  const now = new Date();
+  const isCurrentYear = year === now.getFullYear();
+  const lastMonth = isCurrentYear ? now.getMonth() : 11;
+  const monthsCount = lastMonth + 1;
+
   const yearData = useMemo(() => {
     const arr = [];
-    for (let m = 0; m < 12; m++) arr.push({ month: m, ...computeMonth(state, year, m) });
+    for (let m = 0; m <= lastMonth; m++) arr.push({ month: m, ...computeMonth(state, year, m) });
     return arr;
-  }, [state, year]);
+  }, [state, year, lastMonth]);
 
   const totals = yearData.reduce((acc, d) => ({
     brut: acc.brut + d.brut,
@@ -1347,7 +1465,12 @@ const YearPage = ({ state, year, setMonth, setTab }) => {
 
       <div className="px-5">
         <Card className="p-5 mb-4">
-          <div className="text-[11px] uppercase tracking-wider text-zinc-500 font-medium mb-3">Bilan {year}</div>
+          <div className="flex items-baseline justify-between mb-3">
+            <div className="text-[11px] uppercase tracking-wider text-zinc-500 font-medium">Bilan {year}</div>
+            {isCurrentYear && (
+              <div className="text-[10px] text-zinc-600 font-medium">à fin {MONTHS_FR[lastMonth].toLowerCase()}</div>
+            )}
+          </div>
           {state.settings.ursaffEnabled !== false ? (
             <div className="grid grid-cols-2 gap-4">
               <div>
@@ -2681,6 +2804,15 @@ const VarExpensesPage = ({ state, setState, year, month, setMonth }) => {
   const [editExpense, setEditExpense] = useState(null);
   const [editCat, setEditCat] = useState(null);
   const [showCatEditor, setShowCatEditor] = useState(false);
+  // Catégories repliées par défaut : ids dépliés stockés dans un Set.
+  const [expandedCats, setExpandedCats] = useState(() => new Set());
+  const toggleCat = (id) => {
+    setExpandedCats(prev => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  };
 
   const data = useMemo(() => computeVarMonth(state, year, month), [state, year, month]);
   const sortedCats = useMemo(() => [...(state.varCategories || [])].sort((a, b) => a.order - b.order), [state.varCategories]);
@@ -2800,38 +2932,54 @@ const VarExpensesPage = ({ state, setState, year, month, setMonth }) => {
           <Plus className="w-4 h-4" /> Ajouter une dépense
         </button>
 
-        {/* Expenses by category */}
+        {/* Expenses by category — sections repliables */}
         {sortedCatIds.map(catId => {
           const cat = catMap[catId];
           const items = byCategory[catId];
           const catTotal = items.reduce((s, e) => s + e.amount, 0);
+          const isOpen = expandedCats.has(catId);
           return (
-            <div key={catId} className="mb-5">
-              <div className="flex items-center justify-between mb-2 px-1">
-                <div className="flex items-center gap-2">
-                  {cat && <div className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: cat.color }} />}
-                  <div className="text-[11px] uppercase tracking-wider font-semibold text-zinc-500">{cat?.name || 'Autre'}</div>
+            <div key={catId} className="mb-3">
+              {/* Header cliquable — replie/déplie le détail des dépenses */}
+              <button
+                onClick={() => toggleCat(catId)}
+                className="w-full flex items-center justify-between p-4 rounded-2xl bg-[#1C1C1E] border border-zinc-800/60 active:bg-[#252527] transition-colors"
+              >
+                <div className="flex items-center gap-2.5 min-w-0">
+                  <ChevronRight
+                    className="w-4 h-4 text-zinc-500 flex-shrink-0 transition-transform"
+                    strokeWidth={2.5}
+                    style={{ transform: isOpen ? 'rotate(90deg)' : 'rotate(0deg)' }}
+                  />
+                  {cat && <div className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: cat.color }} />}
+                  <span className="text-[14px] font-semibold text-white truncate">{cat?.name || 'Autre'}</span>
                 </div>
-                <div className="text-[11px] font-semibold text-zinc-400">{fmt(catTotal, { decimals: 2 })} €</div>
-              </div>
-              <Card>
-                {[...items].sort((a, b) => new Date(b.date) - new Date(a.date)).map((e, i) => (
-                  <div
-                    key={e.id}
-                    onClick={() => setEditExpense(e)}
-                    className={`flex items-center gap-3 p-4 active:bg-[#252527] cursor-pointer ${i < items.length - 1 ? 'border-b border-zinc-800/60' : ''}`}
-                  >
-                    <div className="flex-1 min-w-0">
-                      <div className="text-[14px] font-medium text-white truncate">{e.description || cat?.name || 'Dépense'}</div>
-                      <div className="text-[11px] text-zinc-500 mt-0.5">
-                        {new Date(e.date).toLocaleDateString('fr-FR', { day: '2-digit', month: 'short' })}
+                <div className="flex items-center gap-2 flex-shrink-0">
+                  <span className="text-[14px] font-bold text-white">{fmt(catTotal, { decimals: 2 })} €</span>
+                  <span className="text-[11px] text-zinc-600">{items.length}</span>
+                </div>
+              </button>
+
+              {isOpen && (
+                <Card className="mt-2">
+                  {[...items].sort((a, b) => new Date(b.date) - new Date(a.date)).map((e, i) => (
+                    <div
+                      key={e.id}
+                      onClick={() => setEditExpense(e)}
+                      className={`flex items-center gap-3 p-4 active:bg-[#252527] cursor-pointer ${i < items.length - 1 ? 'border-b border-zinc-800/60' : ''}`}
+                    >
+                      <div className="flex-1 min-w-0">
+                        <div className="text-[14px] font-medium text-white truncate">{e.description || cat?.name || 'Dépense'}</div>
+                        <div className="text-[11px] text-zinc-500 mt-0.5">
+                          {new Date(e.date).toLocaleDateString('fr-FR', { day: '2-digit', month: 'short' })}
+                        </div>
                       </div>
+                      <div className="text-[14px] font-semibold text-white">{fmt(e.amount, { decimals: 2 })} €</div>
+                      <Edit3 className="w-4 h-4 text-zinc-600 flex-shrink-0" />
                     </div>
-                    <div className="text-[14px] font-semibold text-white">{fmt(e.amount, { decimals: 2 })} €</div>
-                    <Edit3 className="w-4 h-4 text-zinc-600 flex-shrink-0" />
-                  </div>
-                ))}
-              </Card>
+                  ))}
+                </Card>
+              )}
             </div>
           );
         })}
@@ -2947,9 +3095,11 @@ const computeControlImpact = (state, control) => {
   const varMonth = computeVarMonth(state, y, m);
   const benefice = monthData.brut - monthData.ursaff;
   const available = benefice - monthData.chargesPaid - varMonth.total;
-  // Les autres Control. en attente du même mois sont aussi pris en compte
+  // Les autres Control. de DÉPENSE en attente du même mois sont aussi pris en
+  // compte (les Control. revenus ne consomment pas l'argent disponible).
   const otherControlsTotal = (state.controls || [])
     .filter(c => c.id !== control.id && c.status !== 'validated' && c.status !== 'cancelled')
+    .filter(c => (c.kind || 'expense') === 'expense')
     .filter(c => {
       const cd = new Date(c.date);
       return cd.getFullYear() === y && cd.getMonth() === m;
@@ -2972,6 +3122,7 @@ const ControlEditor = ({ control, state, setState, onClose }) => {
         const dateStr = t.toISOString().slice(0, 10);
         setForm({
           id: 'new',
+          kind: control.kind || 'expense', // 'expense' | 'income'
           name: '',
           date: dateStr,
           time: `${String(t.getHours()).padStart(2, '0')}:${String(t.getMinutes()).padStart(2, '0')}`,
@@ -2980,7 +3131,7 @@ const ControlEditor = ({ control, state, setState, onClose }) => {
           status: 'pending',
         });
       } else {
-        setForm({ ...control, items: [...(control.items || [])] });
+        setForm({ ...control, kind: control.kind || 'expense', items: [...(control.items || [])] });
       }
     }
   }, [control]);
@@ -2994,12 +3145,19 @@ const ControlEditor = ({ control, state, setState, onClose }) => {
 
   if (!control || !form) return null;
   const isNew = control.id === 'new';
+  const isIncome = form.kind === 'income';
 
   const sortedCats = [...(state.varCategories || [])].sort((a, b) => a.order - b.order);
+  const activeActivities = state.activities.filter(a => a.active !== false);
   const overBudget = impact.remainingAfter < 0;
 
+  // Item par défaut : différent selon le type
+  const buildEmptyItem = (kind) => kind === 'income'
+    ? { id: newId(), name: '', amount: '', activityId: activeActivities[0]?.id || '', clientId: '' }
+    : { id: newId(), name: '', amount: '', categoryId: sortedCats[0]?.id || '' };
+
   const addItem = () => {
-    setForm({ ...form, items: [...form.items, { id: newId(), name: '', amount: '', categoryId: sortedCats[0]?.id || '' }] });
+    setForm({ ...form, items: [...form.items, buildEmptyItem(form.kind)] });
   };
   const updateItem = (id, patch) => {
     setForm({ ...form, items: form.items.map(it => it.id === id ? { ...it, ...patch } : it) });
@@ -3008,9 +3166,15 @@ const ControlEditor = ({ control, state, setState, onClose }) => {
     setForm({ ...form, items: form.items.filter(it => it.id !== id) });
   };
 
+  // Quand on bascule entre dépense et revenu, on remet les items à zéro
+  // car la structure de l'item change (categoryId vs activityId/clientId).
+  const switchKind = (kind) => {
+    if (kind === form.kind) return;
+    setForm({ ...form, kind, items: [] });
+  };
+
   const save = () => {
     if (!form.name.trim()) return;
-    // Nettoyage : conversion des montants en nombre, suppression des items vides
     const cleanItems = form.items
       .map(it => ({ ...it, amount: parseFloat(String(it.amount).replace(',', '.')) || 0 }))
       .filter(it => it.amount > 0);
@@ -3029,16 +3193,43 @@ const ControlEditor = ({ control, state, setState, onClose }) => {
     onClose();
   };
 
+  // Palette dynamique selon le type
+  const accent = isIncome
+    ? { color: '#30D158', bg: 'rgba(48,209,88,0.10)', bg2: 'rgba(48,209,88,0.04)', border: 'rgba(48,209,88,0.20)', soft: 'rgba(48,209,88,0.7)' }
+    : { color: '#5E5CE6', bg: 'rgba(94,92,230,0.10)', bg2: 'rgba(94,92,230,0.04)', border: 'rgba(94,92,230,0.20)', soft: 'rgba(94,92,230,0.7)' };
+
   return (
     <Sheet open={!!control} onClose={onClose} title={isNew ? 'Nouveau Control.' : 'Modifier'}>
       <div className="space-y-4">
+        {/* Toggle Dépense / Revenu — visible seulement à la création */}
+        {isNew && (
+          <div className="grid grid-cols-2 gap-2 p-1 bg-[#1C1C1E] rounded-2xl border border-zinc-800/60">
+            <button
+              onClick={() => switchKind('expense')}
+              className={`py-2.5 rounded-xl text-[13px] font-semibold flex items-center justify-center gap-1.5 transition-all ${
+                !isIncome ? 'bg-[#2C2C2E] text-white shadow-sm' : 'text-zinc-500'
+              }`}
+            >
+              <ShoppingBag className="w-3.5 h-3.5" /> Dépense
+            </button>
+            <button
+              onClick={() => switchKind('income')}
+              className={`py-2.5 rounded-xl text-[13px] font-semibold flex items-center justify-center gap-1.5 transition-all ${
+                isIncome ? 'bg-[#2C2C2E] text-emerald-400 shadow-sm' : 'text-zinc-500'
+              }`}
+            >
+              <TrendingUp className="w-3.5 h-3.5" /> Revenu
+            </button>
+          </div>
+        )}
+
         <div>
           <label className="text-[11px] uppercase tracking-wider text-zinc-500 font-medium">Nom</label>
           <input
             type="text"
             value={form.name}
             onChange={(e) => setForm({ ...form, name: e.target.value })}
-            placeholder="Ex. Soirée cinéma"
+            placeholder={isIncome ? 'Ex. Mariage 12 juillet' : 'Ex. Soirée cinéma'}
             autoFocus={isNew}
             className="w-full mt-1.5 bg-[#2C2C2E] rounded-xl px-4 py-3 text-white text-[15px] outline-none"
           />
@@ -3079,8 +3270,10 @@ const ControlEditor = ({ control, state, setState, onClose }) => {
         {/* Items */}
         <div>
           <div className="flex items-center justify-between mb-2 px-1">
-            <label className="text-[11px] uppercase tracking-wider text-zinc-500 font-medium">Dépenses prévues</label>
-            <button onClick={addItem} className="flex items-center gap-1 text-[12px] text-emerald-400 font-medium">
+            <label className="text-[11px] uppercase tracking-wider text-zinc-500 font-medium">
+              {isIncome ? 'Revenus prévus' : 'Dépenses prévues'}
+            </label>
+            <button onClick={addItem} className={`flex items-center gap-1 text-[12px] font-medium ${isIncome ? 'text-emerald-400' : 'text-emerald-400'}`}>
               <Plus className="w-3.5 h-3.5" /> Ajouter
             </button>
           </div>
@@ -3089,37 +3282,80 @@ const ControlEditor = ({ control, state, setState, onClose }) => {
               onClick={addItem}
               className="w-full p-4 rounded-xl border border-dashed border-zinc-800 text-[13px] text-zinc-500 active:bg-white/5"
             >
-              + Ajouter une dépense prévue
+              + Ajouter {isIncome ? 'un revenu prévu' : 'une dépense prévue'}
             </button>
           ) : (
             <div className="space-y-2">
-              {form.items.map((it) => {
-                const cat = sortedCats.find(c => c.id === it.categoryId);
-                return (
-                  <div key={it.id} className="bg-[#1C1C1E] border border-zinc-800/60 rounded-xl p-3 space-y-2">
-                    <div className="flex items-center gap-2">
+              {form.items.map((it) => (
+                <div key={it.id} className="bg-[#1C1C1E] border border-zinc-800/60 rounded-xl p-3 space-y-2">
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="text"
+                      value={it.name}
+                      onChange={(e) => updateItem(it.id, { name: e.target.value })}
+                      placeholder={isIncome ? 'Ex. Prestation DJ' : 'Ex. Cinéma'}
+                      className="flex-1 bg-[#2C2C2E] rounded-lg px-3 py-2 text-white text-[13.5px] outline-none"
+                    />
+                    <div className="relative">
                       <input
                         type="text"
-                        value={it.name}
-                        onChange={(e) => updateItem(it.id, { name: e.target.value })}
-                        placeholder="Ex. Cinéma"
-                        className="flex-1 bg-[#2C2C2E] rounded-lg px-3 py-2 text-white text-[13.5px] outline-none"
+                        inputMode="decimal"
+                        value={it.amount}
+                        onChange={(e) => updateItem(it.id, { amount: e.target.value })}
+                        placeholder="0"
+                        className="w-20 bg-[#2C2C2E] rounded-lg px-2 py-2 text-white text-[13.5px] outline-none text-right pr-5"
                       />
-                      <div className="relative">
-                        <input
-                          type="text"
-                          inputMode="decimal"
-                          value={it.amount}
-                          onChange={(e) => updateItem(it.id, { amount: e.target.value })}
-                          placeholder="0"
-                          className="w-20 bg-[#2C2C2E] rounded-lg px-2 py-2 text-white text-[13.5px] outline-none text-right pr-5"
-                        />
-                        <span className="absolute right-2 top-1/2 -translate-y-1/2 text-zinc-500 text-[11px]">€</span>
-                      </div>
-                      <button onClick={() => removeItem(it.id)} className="text-zinc-600 active:text-rose-400 p-1">
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
+                      <span className="absolute right-2 top-1/2 -translate-y-1/2 text-zinc-500 text-[11px]">€</span>
                     </div>
+                    <button onClick={() => removeItem(it.id)} className="text-zinc-600 active:text-rose-400 p-1">
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+
+                  {/* Sélecteur de catégorie/activité selon le type */}
+                  {isIncome ? (
+                    <>
+                      <div className="flex flex-wrap gap-1.5">
+                        {activeActivities.map(a => (
+                          <button
+                            key={a.id}
+                            onClick={() => updateItem(it.id, { activityId: a.id })}
+                            className={`px-2 py-0.5 rounded-full text-[10.5px] font-medium flex items-center gap-1 ${
+                              it.activityId === a.id ? 'bg-white text-black' : 'bg-[#2C2C2E] text-zinc-400'
+                            }`}
+                          >
+                            <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: a.color }} />
+                            {a.name}
+                          </button>
+                        ))}
+                      </div>
+                      {/* Client (optionnel) */}
+                      {(state.clients || []).length > 0 && (
+                        <div className="flex flex-wrap gap-1.5 items-center">
+                          <span className="text-[10px] text-zinc-600 uppercase tracking-wider font-semibold px-1">Client</span>
+                          <button
+                            onClick={() => updateItem(it.id, { clientId: '' })}
+                            className={`px-2 py-0.5 rounded-full text-[10.5px] font-medium ${
+                              !it.clientId ? 'bg-zinc-700 text-white' : 'bg-[#2C2C2E] text-zinc-500'
+                            }`}
+                          >
+                            Aucun
+                          </button>
+                          {state.clients.map(c => (
+                            <button
+                              key={c.id}
+                              onClick={() => updateItem(it.id, { clientId: c.id })}
+                              className={`px-2 py-0.5 rounded-full text-[10.5px] font-medium ${
+                                it.clientId === c.id ? 'bg-white text-black' : 'bg-[#2C2C2E] text-zinc-400'
+                              }`}
+                            >
+                              {c.name}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </>
+                  ) : (
                     <div className="flex flex-wrap gap-1.5">
                       {sortedCats.map(c => (
                         <button
@@ -3134,9 +3370,9 @@ const ControlEditor = ({ control, state, setState, onClose }) => {
                         </button>
                       ))}
                     </div>
-                  </div>
-                );
-              })}
+                  )}
+                </div>
+              ))}
             </div>
           )}
         </div>
@@ -3146,36 +3382,61 @@ const ControlEditor = ({ control, state, setState, onClose }) => {
           <div
             className="rounded-2xl p-4"
             style={{
-              background: overBudget
-                ? 'linear-gradient(135deg, rgba(255,69,58,0.10) 0%, rgba(255,69,58,0.04) 100%)'
-                : 'linear-gradient(135deg, rgba(48,209,88,0.10) 0%, rgba(48,209,88,0.04) 100%)',
-              border: overBudget ? '1px solid rgba(255,69,58,0.20)' : '1px solid rgba(48,209,88,0.20)',
+              background: isIncome
+                ? `linear-gradient(135deg, ${accent.bg} 0%, ${accent.bg2} 100%)`
+                : (overBudget
+                  ? 'linear-gradient(135deg, rgba(255,69,58,0.10) 0%, rgba(255,69,58,0.04) 100%)'
+                  : 'linear-gradient(135deg, rgba(48,209,88,0.10) 0%, rgba(48,209,88,0.04) 100%)'),
+              border: isIncome
+                ? `1px solid ${accent.border}`
+                : (overBudget ? '1px solid rgba(255,69,58,0.20)' : '1px solid rgba(48,209,88,0.20)'),
             }}
           >
-            <div className="flex items-center justify-between mb-2">
-              <div className="text-[10px] uppercase tracking-wider font-semibold"
-                style={{ color: overBudget ? 'rgba(255,69,58,0.7)' : 'rgba(48,209,88,0.7)' }}>
-                Impact estimé
-              </div>
-              <div className="text-[13px] font-bold text-white">{fmt(impact.total, { decimals: 2 })} €</div>
-            </div>
-            {overBudget ? (
-              <div className="flex items-start gap-2">
-                <AlertTriangle className="w-4 h-4 text-rose-400 flex-shrink-0 mt-0.5" />
+            {isIncome ? (
+              <>
+                <div className="flex items-center justify-between mb-2">
+                  <div className="text-[10px] uppercase tracking-wider font-semibold" style={{ color: accent.soft }}>
+                    Revenus estimés
+                  </div>
+                  <div className="text-[13px] font-bold text-white">+{fmt(impact.total, { decimals: 2 })} €</div>
+                </div>
                 <div>
-                  <div className="text-[13px] font-semibold text-rose-300">Dépasse votre disponible</div>
-                  <div className="text-[11.5px] text-rose-400/70 mt-0.5">
-                    de {fmt(Math.abs(impact.remainingAfter), { decimals: 2 })} €
+                  <div className="text-[13px] font-semibold text-emerald-300">
+                    CA estimé après ce Control. : {fmt((computeMonth(state, new Date(form.date).getFullYear(), new Date(form.date).getMonth()).brut) + impact.total, { decimals: 2 })} €
+                  </div>
+                  <div className="text-[11px] text-emerald-400/60 mt-0.5">
+                    sur {MONTHS_FR[new Date(form.date).getMonth()]} {new Date(form.date).getFullYear()}
                   </div>
                 </div>
-              </div>
+              </>
             ) : (
-              <div>
-                <div className="text-[13px] font-semibold text-emerald-300">
-                  Après ce Control. : {fmt(impact.remainingAfter, { decimals: 2 })} €
+              <>
+                <div className="flex items-center justify-between mb-2">
+                  <div className="text-[10px] uppercase tracking-wider font-semibold"
+                    style={{ color: overBudget ? 'rgba(255,69,58,0.7)' : 'rgba(48,209,88,0.7)' }}>
+                    Impact estimé
+                  </div>
+                  <div className="text-[13px] font-bold text-white">{fmt(impact.total, { decimals: 2 })} €</div>
                 </div>
-                <div className="text-[11px] text-emerald-400/60 mt-0.5">restant ce mois-ci</div>
-              </div>
+                {overBudget ? (
+                  <div className="flex items-start gap-2">
+                    <AlertTriangle className="w-4 h-4 text-rose-400 flex-shrink-0 mt-0.5" />
+                    <div>
+                      <div className="text-[13px] font-semibold text-rose-300">Dépasse votre disponible</div>
+                      <div className="text-[11.5px] text-rose-400/70 mt-0.5">
+                        de {fmt(Math.abs(impact.remainingAfter), { decimals: 2 })} €
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  <div>
+                    <div className="text-[13px] font-semibold text-emerald-300">
+                      Après ce Control. : {fmt(impact.remainingAfter, { decimals: 2 })} €
+                    </div>
+                    <div className="text-[11px] text-emerald-400/60 mt-0.5">restant ce mois-ci</div>
+                  </div>
+                )}
+              </>
             )}
           </div>
         )}
@@ -3185,7 +3446,7 @@ const ControlEditor = ({ control, state, setState, onClose }) => {
           disabled={!form.name.trim()}
           className="w-full bg-white text-black font-semibold py-3.5 rounded-xl active:scale-[0.98] transition-transform disabled:opacity-40 disabled:bg-zinc-700 disabled:text-zinc-500"
         >
-          {isNew ? 'Créer le Control.' : 'Enregistrer'}
+          {isNew ? `Créer le Control.` : 'Enregistrer'}
         </button>
 
         {!isNew && (
@@ -3202,24 +3463,45 @@ const ControlEditor = ({ control, state, setState, onClose }) => {
 const ControlValidationSheet = ({ control, state, setState, onClose, onEdit }) => {
   if (!control) return null;
 
+  const isIncome = (control.kind || 'expense') === 'income';
   const total = (control.items || []).reduce((s, it) => s + Number(it.amount || 0), 0);
 
-  // Valider : convertit les items en varExpenses à la date du Control.
+  // Valider :
+  //  - kind 'expense' : convertit les items en varExpenses à la date du Control.
+  //  - kind 'income'  : convertit les items en transactions (vraies ventes) à la date du Control.
   const validate = () => {
-    const newVarExpenses = (control.items || [])
-      .filter(it => Number(it.amount || 0) > 0)
-      .map(it => ({
-        id: newId(),
-        amount: Number(it.amount),
-        categoryId: it.categoryId,
-        description: it.name ? `${control.name} · ${it.name}` : control.name,
-        date: control.date,
+    if (isIncome) {
+      const newTransactions = (control.items || [])
+        .filter(it => Number(it.amount || 0) > 0 && it.activityId)
+        .map(it => ({
+          id: newId(),
+          amount: Number(it.amount),
+          activityId: it.activityId,
+          clientId: it.clientId || null,
+          description: it.name ? `${control.name} · ${it.name}` : control.name,
+          date: control.date,
+        }));
+      setState(s => ({
+        ...s,
+        transactions: [...s.transactions, ...newTransactions],
+        controls: (s.controls || []).map(c => c.id === control.id ? { ...c, status: 'validated' } : c),
       }));
-    setState(s => ({
-      ...s,
-      varExpenses: [...(s.varExpenses || []), ...newVarExpenses],
-      controls: (s.controls || []).map(c => c.id === control.id ? { ...c, status: 'validated' } : c),
-    }));
+    } else {
+      const newVarExpenses = (control.items || [])
+        .filter(it => Number(it.amount || 0) > 0)
+        .map(it => ({
+          id: newId(),
+          amount: Number(it.amount),
+          categoryId: it.categoryId,
+          description: it.name ? `${control.name} · ${it.name}` : control.name,
+          date: control.date,
+        }));
+      setState(s => ({
+        ...s,
+        varExpenses: [...(s.varExpenses || []), ...newVarExpenses],
+        controls: (s.controls || []).map(c => c.id === control.id ? { ...c, status: 'validated' } : c),
+      }));
+    }
     onClose();
   };
 
@@ -3256,8 +3538,10 @@ const ControlValidationSheet = ({ control, state, setState, onClose, onEdit }) =
             )}
           </div>
           <div className="flex items-baseline gap-2">
-            <span className="text-[32px] font-bold text-white leading-none tracking-tight">{fmt(total, { decimals: 2 })}</span>
-            <span className="text-[16px] text-zinc-500 font-medium">€ prévus</span>
+            <span className={`text-[32px] font-bold leading-none tracking-tight ${isIncome ? 'text-emerald-300' : 'text-white'}`}>
+              {isIncome ? '+' : ''}{fmt(total, { decimals: 2 })}
+            </span>
+            <span className="text-[16px] text-zinc-500 font-medium">€ {isIncome ? 'attendus' : 'prévus'}</span>
           </div>
           {control.note && (
             <div className="text-[12px] text-zinc-500 mt-2">{control.note}</div>
@@ -3267,20 +3551,32 @@ const ControlValidationSheet = ({ control, state, setState, onClose, onEdit }) =
         {/* Items list */}
         {(control.items || []).length > 0 && (
           <div>
-            <div className="text-[11px] uppercase tracking-wider font-semibold text-zinc-500 mb-2 px-1">Dépenses prévues</div>
+            <div className="text-[11px] uppercase tracking-wider font-semibold text-zinc-500 mb-2 px-1">
+              {isIncome ? 'Revenus prévus' : 'Dépenses prévues'}
+            </div>
             <Card>
               {control.items.map((it, i) => {
-                const cat = (state.varCategories || []).find(c => c.id === it.categoryId);
+                // Selon le type, on récupère soit l'activité, soit la catégorie
+                const meta = isIncome
+                  ? state.activities.find(a => a.id === it.activityId)
+                  : (state.varCategories || []).find(c => c.id === it.categoryId);
+                const client = isIncome && it.clientId ? (state.clients || []).find(c => c.id === it.clientId) : null;
                 return (
                   <div key={it.id} className={`flex items-center justify-between p-3.5 ${i < control.items.length - 1 ? 'border-b border-zinc-800/60' : ''}`}>
                     <div className="flex items-center gap-2.5 min-w-0">
-                      {cat && <div className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: cat.color }} />}
+                      {meta && <div className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: meta.color }} />}
                       <div className="min-w-0">
-                        <div className="text-[13.5px] font-medium text-white truncate">{it.name || cat?.name || 'Sans nom'}</div>
-                        {cat && <div className="text-[10.5px] text-zinc-500 mt-0.5">{cat.name}</div>}
+                        <div className="text-[13.5px] font-medium text-white truncate">{it.name || meta?.name || 'Sans nom'}</div>
+                        {meta && (
+                          <div className="text-[10.5px] text-zinc-500 mt-0.5 truncate">
+                            {meta.name}{client ? ` · ${client.name}` : ''}
+                          </div>
+                        )}
                       </div>
                     </div>
-                    <div className="text-[13.5px] font-semibold text-white flex-shrink-0">{fmt(it.amount, { decimals: 2 })} €</div>
+                    <div className={`text-[13.5px] font-semibold flex-shrink-0 ${isIncome ? 'text-emerald-400' : 'text-white'}`}>
+                      {isIncome ? '+' : ''}{fmt(it.amount, { decimals: 2 })} €
+                    </div>
                   </div>
                 );
               })}
@@ -3292,13 +3588,13 @@ const ControlValidationSheet = ({ control, state, setState, onClose, onEdit }) =
         {!isValidated && !isCancelled && (
           <>
             <div className="text-[13px] text-zinc-400 text-center py-2">
-              Avez-vous respecté ce Control. ?
+              {isIncome ? 'Confirmer ces revenus reçus ?' : 'Avez-vous respecté ce Control. ?'}
             </div>
             <button
               onClick={validate}
               className="w-full bg-emerald-400 text-black font-semibold py-3.5 rounded-xl active:scale-[0.98] transition-transform flex items-center justify-center gap-2"
             >
-              <Check className="w-4 h-4" strokeWidth={3} /> Valider — créer les dépenses
+              <Check className="w-4 h-4" strokeWidth={3} /> Valider — créer {isIncome ? 'les revenus' : 'les dépenses'}
             </button>
             <button
               onClick={() => { onClose(); onEdit && onEdit(control); }}
@@ -3362,6 +3658,10 @@ const ControlsPage = ({ state, setState }) => {
   const ControlRow = ({ c }) => {
     const total = (c.items || []).reduce((s, it) => s + Number(it.amount || 0), 0);
     const d = new Date(c.date);
+    const isIncome = (c.kind || 'expense') === 'income';
+    // Couleur d'accent : emerald pour revenus, indigo pour dépenses
+    const accentBg = isIncome ? 'bg-emerald-500/15' : 'bg-indigo-500/15';
+    const accentText = isIncome ? 'text-emerald-400' : 'text-indigo-400';
     return (
       <button
         onClick={() => setViewControl(c)}
@@ -3371,14 +3671,19 @@ const ControlsPage = ({ state, setState }) => {
           <div className={`w-9 h-9 rounded-2xl flex items-center justify-center flex-shrink-0 ${
             c.status === 'validated' ? 'bg-emerald-500/15' :
             c.status === 'cancelled' ? 'bg-zinc-800' :
-            'bg-indigo-500/15'
+            accentBg
           }`}>
             {c.status === 'validated' ? <Check className="w-4 h-4 text-emerald-400" strokeWidth={3} /> :
              c.status === 'cancelled' ? <X className="w-4 h-4 text-zinc-500" /> :
-             <Target className="w-4 h-4 text-indigo-400" />}
+             (isIncome ? <TrendingUp className={`w-4 h-4 ${accentText}`} /> : <Target className={`w-4 h-4 ${accentText}`} />)}
           </div>
           <div className="min-w-0 flex-1">
-            <div className="text-[14px] font-semibold text-white truncate">{c.name || 'Sans nom'}</div>
+            <div className="flex items-center gap-1.5 min-w-0">
+              <div className="text-[14px] font-semibold text-white truncate">{c.name || 'Sans nom'}</div>
+              {isIncome && c.status !== 'validated' && c.status !== 'cancelled' && (
+                <span className="px-1.5 py-px rounded-md bg-emerald-500/15 text-emerald-400 text-[9px] uppercase tracking-wider font-semibold flex-shrink-0">Revenu</span>
+              )}
+            </div>
             <div className="text-[11px] text-zinc-500 mt-0.5">
               {d.toLocaleDateString('fr-FR', { day: '2-digit', month: 'short' })}
               {c.time ? ` · ${c.time}` : ''}
@@ -3387,8 +3692,11 @@ const ControlsPage = ({ state, setState }) => {
           </div>
         </div>
         <div className="text-right flex-shrink-0">
-          <div className={`text-[14px] font-bold ${c.status === 'cancelled' ? 'text-zinc-500 line-through' : 'text-white'}`}>
-            {fmt(total, { decimals: 0 })} €
+          <div className={`text-[14px] font-bold ${
+            c.status === 'cancelled' ? 'text-zinc-500 line-through' :
+            isIncome ? 'text-emerald-400' : 'text-white'
+          }`}>
+            {isIncome ? '+' : ''}{fmt(total, { decimals: 0 })} €
           </div>
         </div>
       </button>
@@ -3412,10 +3720,10 @@ const ControlsPage = ({ state, setState }) => {
             <div className="w-14 h-14 rounded-2xl bg-indigo-500/10 flex items-center justify-center mx-auto mb-4">
               <Target className="w-6 h-6 text-indigo-400" />
             </div>
-            <div className="text-[15px] font-semibold text-white mb-1.5">Anticipe tes dépenses</div>
+            <div className="text-[15px] font-semibold text-white mb-1.5">Anticipe tes flux financiers</div>
             <div className="text-[12.5px] text-zinc-500 leading-relaxed px-4">
-              Crée un Control. pour prévoir une sortie, un week-end, un achat.<br />
-              Visualise l'impact sur ton budget avant de t'engager.
+              Crée un Control. pour prévoir une dépense ou un revenu à venir.<br />
+              Visualise leur impact avant qu'ils arrivent.
             </div>
           </div>
         )}
@@ -3504,8 +3812,95 @@ const csvEscape = (v) => {
 };
 const toCSV = (rows) => rows.map(r => r.map(csvEscape).join(';')).join('\n');
 
+// ── PDF mensuel premium (clair, sans dépendance, via window.print) ──────────
+const esc = (s) => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
+const generateMonthlyPDF = (state, year, month) => {
+  const eur = (n) => `${(Number(n) || 0).toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €`;
+  const pct = (n, t) => t > 0 ? `${(n / t * 100).toFixed(1).replace('.', ',')} %` : '—';
+  const d = computeMonth(state, year, month);
+  const v = computeVarMonth(state, year, month);
+  const ursaffActive = state.settings.ursaffEnabled !== false;
+  const benefice = d.brut - d.ursaff;
+  const dispo = benefice - d.chargesPaid - v.total;
+
+  const actMap = {}; state.activities.forEach(a => { actMap[a.id] = a; });
+  const cliMap = {}; (state.clients || []).forEach(c => { cliMap[c.id] = c; });
+  const catMap = {}; (state.varCategories || []).forEach(c => { catMap[c.id] = c; });
+
+  // Répartitions du mois
+  const txs = state.transactions.filter(t => { const x = new Date(t.date); return x.getFullYear() === year && x.getMonth() === month; });
+  const byAct = {}, byCli = {};
+  txs.forEach(t => {
+    byAct[t.activityId] = (byAct[t.activityId] || 0) + Number(t.amount || 0);
+    if (t.clientId) byCli[t.clientId] = (byCli[t.clientId] || 0) + Number(t.amount || 0);
+  });
+  const actRows = Object.entries(byAct).sort((a, b) => b[1] - a[1])
+    .map(([id, tot]) => `<tr><td><span class="dot" style="background:${actMap[id]?.color || '#999'}"></span>${esc(actMap[id]?.name || 'Inconnu')}</td><td class="r">${eur(tot)}</td><td class="r muted">${pct(tot, d.brut)}</td></tr>`).join('');
+  const cliRows = Object.entries(byCli).sort((a, b) => b[1] - a[1])
+    .map(([id, tot]) => `<tr><td>${esc(cliMap[id]?.name || 'Inconnu')}</td><td class="r">${eur(tot)}</td><td class="r muted">${pct(tot, d.brut)}</td></tr>`).join('');
+  const catRows = Object.entries(v.byCategory).sort((a, b) => b[1] - a[1])
+    .map(([id, tot]) => `<tr><td><span class="dot" style="background:${catMap[id]?.color || '#999'}"></span>${esc(catMap[id]?.name || 'Autre')}</td><td class="r">${eur(tot)}</td><td class="r muted">${pct(tot, v.total)}</td></tr>`).join('');
+
+  const userName = state.profile?.displayName || state.profile?.username || '';
+  const genDate = new Date().toLocaleDateString('fr-FR', { day: '2-digit', month: 'long', year: 'numeric' });
+
+  const summaryCards = [
+    { label: "Chiffre d'affaires", value: eur(d.brut), accent: '#0A0A0A' },
+    ...(ursaffActive ? [{ label: 'URSSAF à reverser', value: eur(d.ursaff), accent: '#C2410C' }] : []),
+    { label: 'Charges fixes', value: eur(d.charges), accent: '#0A0A0A' },
+    { label: 'Dépenses variables', value: eur(v.total), accent: '#0A0A0A' },
+    { label: 'Bénéfice net', value: eur(benefice), accent: '#047857' },
+  ].map(c => `<div class="card"><div class="card-l">${c.label}</div><div class="card-v" style="color:${c.accent}">${c.value}</div></div>`).join('');
+
+  const html = `<!DOCTYPE html><html lang="fr"><head><meta charset="utf-8"><title>Control. — ${esc(MONTHS_FR[month])} ${year}</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:-apple-system,BlinkMacSystemFont,"SF Pro Display","Inter",system-ui,sans-serif;color:#0A0A0A;background:#fff;padding:48px 44px;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+.head{display:flex;justify-content:space-between;align-items:flex-end;border-bottom:2px solid #0A0A0A;padding-bottom:18px;margin-bottom:28px}
+.brand{font-size:26px;font-weight:800;letter-spacing:-1px}
+.brand span{color:#999}
+.period{font-size:13px;color:#666;text-align:right;line-height:1.5}
+.period b{display:block;font-size:18px;color:#0A0A0A;font-weight:700;letter-spacing:-.3px}
+.cards{display:grid;grid-template-columns:repeat(2,1fr);gap:10px;margin-bottom:30px}
+.card{border:1px solid #E5E5E5;border-radius:12px;padding:14px 16px}
+.card-l{font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:#888;font-weight:600;margin-bottom:5px}
+.card-v{font-size:20px;font-weight:700;letter-spacing:-.4px}
+h2{font-size:11px;text-transform:uppercase;letter-spacing:.1em;color:#888;font-weight:700;margin:26px 0 10px}
+table{width:100%;border-collapse:collapse}
+td{padding:9px 4px;font-size:13px;border-bottom:1px solid #F0F0F0}
+td.r{text-align:right;font-variant-numeric:tabular-nums;font-weight:600}
+td.muted{color:#999;font-weight:500;width:64px}
+.dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:8px;vertical-align:middle}
+.empty{font-size:12px;color:#aaa;padding:10px 4px}
+.foot{margin-top:40px;padding-top:16px;border-top:1px solid #E5E5E5;font-size:10.5px;color:#999;line-height:1.6}
+@media print{body{padding:24px}@page{margin:14mm}}
+</style></head><body>
+<div class="head">
+  <div class="brand">Control<span>.</span></div>
+  <div class="period"><b>${esc(MONTHS_FR[month])} ${year}</b>${userName ? esc(userName) : 'Rapport mensuel'}</div>
+</div>
+<div class="cards">${summaryCards}</div>
+${actRows ? `<h2>Revenus par activité</h2><table>${actRows}</table>` : ''}
+${cliRows ? `<h2>Revenus par client</h2><table>${cliRows}</table>` : ''}
+${catRows ? `<h2>Dépenses par catégorie</h2><table>${catRows}</table>` : '<h2>Dépenses par catégorie</h2><div class="empty">Aucune dépense ce mois-ci.</div>'}
+<div class="foot">
+  Document généré le ${genDate} via Control.${userName ? ` pour ${esc(userName)}` : ''}.<br>
+  Control. est un outil de suivi personnel à titre indicatif. Ce document ne constitue ni un document comptable officiel ni un conseil fiscal. Les montants reflètent uniquement les données saisies par l'utilisateur.
+</div>
+<script>window.onload=function(){setTimeout(function(){window.print()},350)}</script>
+</body></html>`;
+
+  const w = window.open('', '_blank');
+  if (!w) return false;
+  w.document.open(); w.document.write(html); w.document.close();
+  return true;
+};
+
 const ExportSheet = ({ open, onClose, state }) => {
-  const [year, setYear] = useState(new Date().getFullYear());
+  const now = new Date();
+  const [year, setYear] = useState(now.getFullYear());
+  const [pdfMonth, setPdfMonth] = useState(now.getMonth());
   const [msg, setMsg] = useState(null);
 
   const activityMap = useMemo(() => {
@@ -3659,6 +4054,13 @@ const ExportSheet = ({ open, onClose, state }) => {
     setTimeout(() => exportStats(), 750);
   };
 
+  const exportPDF = () => {
+    const ok = generateMonthlyPDF(state, year, pdfMonth);
+    if (ok) { setMsg({ type: 'ok', text: `Rapport ${MONTHS_FR[pdfMonth]} ${year} prêt.` }); }
+    else { setMsg({ type: 'err', text: 'Autorise les fenêtres pop-up pour générer le PDF.' }); }
+    setTimeout(() => setMsg(null), 3500);
+  };
+
   const years = useMemo(() => {
     const set = new Set([new Date().getFullYear()]);
     state.transactions.forEach(t => set.add(new Date(t.date).getFullYear()));
@@ -3684,8 +4086,39 @@ const ExportSheet = ({ open, onClose, state }) => {
           </div>
         </div>
 
+        {/* ── RAPPORT PDF MENSUEL ──────────────────────────────────────── */}
+        <div className="rounded-2xl p-4" style={{ background: 'linear-gradient(135deg, #1C1C1E 0%, #252527 100%)', border: '1px solid rgba(255,255,255,0.06)' }}>
+          <div className="flex items-center gap-3 mb-3">
+            <div className="w-9 h-9 rounded-2xl bg-white/10 flex items-center justify-center">
+              <FileText className="w-4 h-4 text-white" />
+            </div>
+            <div>
+              <div className="text-[14px] font-semibold text-white">Rapport mensuel PDF</div>
+              <div className="text-[11px] text-zinc-500">Document clair, prêt à imprimer ou partager</div>
+            </div>
+          </div>
+          <label className="text-[10px] uppercase tracking-wider text-zinc-500 font-medium">Mois</label>
+          <div className="flex flex-wrap gap-1.5 mt-1.5 mb-3">
+            {MONTHS_SHORT.map((m, i) => (
+              <button
+                key={i}
+                onClick={() => setPdfMonth(i)}
+                className={`px-2.5 py-1 rounded-lg text-[11.5px] font-semibold transition-colors ${pdfMonth === i ? 'bg-white text-black' : 'bg-[#2C2C2E] text-zinc-400'}`}
+              >
+                {m}
+              </button>
+            ))}
+          </div>
+          <button
+            onClick={exportPDF}
+            className="w-full bg-white text-black font-semibold py-3 rounded-xl active:scale-[0.98] transition-transform flex items-center justify-center gap-2"
+          >
+            <Download className="w-4 h-4" /> Générer le PDF · {MONTHS_FR[pdfMonth]} {year}
+          </button>
+        </div>
+
         <div className="text-[11px] text-zinc-500 leading-relaxed px-1">
-          Format CSV compatible Excel, Numbers et Google Sheets.
+          Ou exporte en CSV (Excel, Numbers, Google Sheets).
         </div>
 
         <div className="space-y-2">
@@ -3770,6 +4203,9 @@ const ProfilePage = ({ user, state, setState, onSignOut, onExport }) => {
   const [loading, setLoading] = useState(false);
   const [msg, setMsg] = useState(null);
   const [showSettings, setShowSettings] = useState(false);
+  const [legalDoc, setLegalDoc] = useState(null);       // 'cgu' | 'privacy' | null
+  const [deleteSheet, setDeleteSheet] = useState(false); // confirmation suppression compte
+  const [deleting, setDeleting] = useState(false);
 
   const firstName = user?.user_metadata?.first_name || '';
   const username = user?.user_metadata?.username || '';
@@ -3798,6 +4234,21 @@ const ProfilePage = ({ user, state, setState, onSignOut, onExport }) => {
     setState(s => ({ ...s, profile: { ...(s.profile || {}), avatar: null } }));
     setAvatarMsg({ type: 'ok', text: 'Photo retirée.' });
     setTimeout(() => setAvatarMsg(null), 2000);
+  };
+
+  // Suppression définitive du compte (droit à l'effacement RGPD) :
+  // 1) efface les données distantes, 2) nettoie le local, 3) déconnecte.
+  const handleDeleteAccount = async () => {
+    setDeleting(true);
+    const res = await deleteAccountData();
+    setDeleting(false);
+    if (!res.success) {
+      setMsg({ type: 'err', text: res.error || 'Suppression impossible. Réessaie.' });
+      return;
+    }
+    try { localStorage.clear(); } catch {}
+    setDeleteSheet(false);
+    onSignOut && onSignOut();
   };
 
   const openEdit = (field) => {
@@ -3979,7 +4430,81 @@ const ProfilePage = ({ user, state, setState, onSignOut, onExport }) => {
             <ChevronRight className="w-4 h-4 text-zinc-600" />
           </button>
         </Card>
+
+        {/* ── Légal & confidentialité ──────────────────────────────────── */}
+        <div className="text-[11px] uppercase tracking-wider font-semibold text-zinc-500 mb-2 px-1">Légal & confidentialité</div>
+        <Card className="mb-5">
+          <button onClick={() => setLegalDoc('cgu')} className="w-full flex items-center justify-between p-4 border-b border-zinc-800/60 active:bg-[#252527]">
+            <div className="flex items-center gap-3">
+              <ScrollText className="w-4 h-4 text-zinc-500" />
+              <span className="text-[14px] font-medium text-white">Conditions d'utilisation</span>
+            </div>
+            <ChevronRight className="w-4 h-4 text-zinc-600" />
+          </button>
+          <button onClick={() => setLegalDoc('privacy')} className="w-full flex items-center justify-between p-4 active:bg-[#252527]">
+            <div className="flex items-center gap-3">
+              <Shield className="w-4 h-4 text-zinc-500" />
+              <span className="text-[14px] font-medium text-white">Politique de confidentialité</span>
+            </div>
+            <ChevronRight className="w-4 h-4 text-zinc-600" />
+          </button>
+        </Card>
+
+        {/* ── Suppression du compte ────────────────────────────────────── */}
+        <Card className="mb-5">
+          <button onClick={() => setDeleteSheet(true)} className="w-full flex items-center justify-between p-4 active:bg-[#252527]">
+            <div className="flex items-center gap-3">
+              <Trash2 className="w-4 h-4 text-rose-400" />
+              <div className="text-left">
+                <div className="text-[14px] font-medium text-rose-400">Supprimer mon compte</div>
+                <div className="text-[11px] text-zinc-500 mt-0.5">Efface définitivement toutes mes données</div>
+              </div>
+            </div>
+            <ChevronRight className="w-4 h-4 text-zinc-600" />
+          </button>
+        </Card>
+
+        {msg && (
+          <div className={`mb-4 px-4 py-3 rounded-xl text-[13px] font-medium ${msg.type === 'err' ? 'bg-rose-500/15 text-rose-400' : 'bg-emerald-500/15 text-emerald-400'}`}>
+            {msg.text}
+          </div>
+        )}
       </div>
+
+      {/* Modale légale */}
+      <LegalModal doc={legalDoc} onClose={() => setLegalDoc(null)} />
+
+      {/* Sheet de confirmation suppression compte */}
+      <Sheet open={deleteSheet} onClose={() => setDeleteSheet(false)} title="Supprimer mon compte">
+        <div className="space-y-4">
+          <div className="rounded-2xl p-4" style={{ background: 'rgba(255,69,58,0.08)', border: '1px solid rgba(255,69,58,0.18)' }}>
+            <div className="flex items-start gap-2.5">
+              <AlertTriangle className="w-5 h-5 text-rose-400 flex-shrink-0 mt-0.5" />
+              <div>
+                <div className="text-[14px] font-semibold text-rose-300">Action irréversible</div>
+                <div className="text-[12.5px] text-rose-400/70 mt-1 leading-relaxed">
+                  Toutes tes données (revenus, charges, dépenses, clients, Control.) seront définitivement supprimées. Cette action ne peut pas être annulée.
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="text-[12.5px] text-zinc-500 leading-relaxed px-1">
+            Pense à exporter tes données avant si tu veux en garder une copie. Tu peux le faire depuis Réglages → Exporter mes données.
+          </div>
+
+          <button
+            onClick={handleDeleteAccount}
+            disabled={deleting}
+            className="w-full bg-rose-500 text-white font-semibold py-3.5 rounded-xl active:scale-[0.98] transition-transform disabled:opacity-50 flex items-center justify-center gap-2"
+          >
+            {deleting ? 'Suppression…' : 'Supprimer définitivement'}
+          </button>
+          <button onClick={() => setDeleteSheet(false)} className="w-full text-zinc-400 text-[14px] font-medium py-2">
+            Annuler
+          </button>
+        </div>
+      </Sheet>
 
       {/* Edit sheet */}
       <Sheet
@@ -4122,9 +4647,88 @@ const TabBar = ({ tab, setTab }) => {
 // App root
 // ---------------------------------------------------------------------------
 
+// Disclaimer affiché une seule fois, au premier lancement après inscription.
+// Clarifie que Control. est un outil de suivi indicatif et que l'utilisateur
+// configure et reste responsable de son taux URSSAF. Conforme à notre position :
+// pas de conseil fiscal, simple miroir des données saisies.
+const OnboardingDisclaimer = ({ onAccept, onOpenLegal }) => {
+  return (
+    <div style={{
+      position: 'fixed', inset: 0, zIndex: 90,
+      background: '#000',
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+      padding: '24px 20px',
+      fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", sans-serif',
+    }}>
+      <div className="anim-1" style={{ width: '100%', maxWidth: 420 }}>
+        <div className="flex flex-col items-center text-center mb-6">
+          <div style={{
+            width: 64, height: 64, borderRadius: 20,
+            background: 'rgba(48,209,88,0.12)', border: '1px solid rgba(48,209,88,0.2)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: 18,
+          }}>
+            <Shield className="w-7 h-7 text-emerald-400" />
+          </div>
+          <h2 style={{ fontSize: 24, fontWeight: 700, color: '#fff', letterSpacing: '-0.5px', margin: '0 0 8px' }}>
+            Bienvenue sur Control.
+          </h2>
+          <p style={{ fontSize: 14.5, color: '#8E8E93', lineHeight: 1.55, margin: 0, maxWidth: 340 }}>
+            Quelques précisions avant de commencer.
+          </p>
+        </div>
+
+        <div className="space-y-3 mb-6">
+          {[
+            { icon: <FileText className="w-4 h-4 text-emerald-400" />, title: 'Un outil de suivi personnel', text: "Control. affiche uniquement les données que tu saisis. Ce n'est pas un logiciel comptable officiel ni un conseil fiscal." },
+            { icon: <Sliders className="w-4 h-4 text-emerald-400" />, title: 'Ton taux URSSAF, ta configuration', text: "Tu définis toi-même ton taux de cotisation. L'estimation URSSAF est indicative et dépend de ce que tu renseignes." },
+            { icon: <Lock className="w-4 h-4 text-emerald-400" />, title: 'Tes données t\'appartiennent', text: 'Elles sont stockées de façon sécurisée, jamais revendues, et tu peux les exporter ou tout supprimer à tout moment.' },
+          ].map((it, i) => (
+            <div key={i} style={{
+              display: 'flex', gap: 12, padding: 14,
+              background: 'rgba(255,255,255,0.025)', border: '1px solid rgba(255,255,255,0.07)',
+              borderRadius: 16,
+            }}>
+              <div style={{ flexShrink: 0, width: 32, height: 32, borderRadius: 10, background: 'rgba(48,209,88,0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                {it.icon}
+              </div>
+              <div>
+                <div style={{ fontSize: 14, fontWeight: 600, color: '#fff', letterSpacing: '-0.2px' }}>{it.title}</div>
+                <div style={{ fontSize: 12.5, color: '#8E8E93', lineHeight: 1.5, marginTop: 2 }}>{it.text}</div>
+              </div>
+            </div>
+          ))}
+        </div>
+
+        <button
+          onClick={onAccept}
+          className="w-full active:scale-[0.98] transition-transform"
+          style={{
+            padding: 16, borderRadius: 14,
+            background: 'linear-gradient(180deg, #FAFAFA 0%, #C7C7CC 100%)',
+            border: 'none', fontSize: 16, fontWeight: 600, color: '#000',
+            letterSpacing: '-0.2px', cursor: 'pointer',
+            boxShadow: '0 4px 20px -4px rgba(255,255,255,0.15), inset 0 1px 0 rgba(255,255,255,0.6)',
+          }}
+        >
+          J'ai compris, commencer
+        </button>
+        <div style={{ textAlign: 'center', marginTop: 14 }}>
+          <button onClick={() => onOpenLegal('privacy')} style={{ fontSize: 12.5, color: '#6E6E73', background: 'none', border: 'none', cursor: 'pointer', textDecoration: 'underline' }}>
+            Politique de confidentialité
+          </button>
+          <span style={{ color: '#3A3A3C', margin: '0 8px' }}>·</span>
+          <button onClick={() => onOpenLegal('cgu')} style={{ fontSize: 12.5, color: '#6E6E73', background: 'none', border: 'none', cursor: 'pointer', textDecoration: 'underline' }}>
+            Conditions d'utilisation
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
 export default function App() {
   const { user, handleAuth, signOut } = useAuthSession();
-  const [state, setState] = useAppState(user);
+  const [state, setState, synced] = useAppState(user);
   const [tab, setTab] = useState('dashboard');
   const [year, setYearState] = useState(TODAY_YEAR);
   const [month, setMonthState] = useState(TODAY_MONTH);
@@ -4132,9 +4736,15 @@ export default function App() {
   const [addVarOpen, setAddVarOpen] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
   const [splashDone, setSplashDone] = useState(false);
+  const [onboardingLegal, setOnboardingLegal] = useState(null); // legal modal over onboarding
   const prevUserRef = useRef(null);
 
   const setMonth = (y, m) => { setYearState(y); setMonthState(m); };
+
+  // Marque l'onboarding comme vu (persisté dans settings → synchronisé Supabase).
+  const acceptOnboarding = () => {
+    setState(s => ({ ...s, settings: { ...s.settings, onboardingDone: true } }));
+  };
 
   // Synchronise le flag global de décimales avec le setting utilisateur.
   // Ce flag est lu par fmt() pour décider de l'affichage avec/sans décimales,
@@ -4168,6 +4778,18 @@ export default function App() {
   // Auth screen
   if (!user) {
     return <AuthScreen onAuth={handleAuth} />;
+  }
+
+  // Onboarding : affiché une fois après inscription, une fois l'état distant
+  // chargé (synced) pour éviter tout flash chez un utilisateur de retour.
+  if (synced && user && !state.settings?.onboardingDone) {
+    return (
+      <div className="min-h-screen bg-black text-white antialiased" style={{ fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", sans-serif' }}>
+        <style>{`@keyframes fadeUp { from { opacity:0; transform:translateY(12px) } to { opacity:1; transform:translateY(0) } } .anim-1 { animation: fadeUp 0.5s cubic-bezier(.22,1,.36,1) both; }`}</style>
+        <OnboardingDisclaimer onAccept={acceptOnboarding} onOpenLegal={(d) => setOnboardingLegal(d)} />
+        <LegalModal doc={onboardingLegal} onClose={() => setOnboardingLegal(null)} />
+      </div>
+    );
   }
 
   return (

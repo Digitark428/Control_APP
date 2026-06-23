@@ -37,3 +37,29 @@ export const saveState = async (state) => {
   }
 }
 
+/**
+ * Supprime toutes les données de l'utilisateur (droit à l'effacement RGPD).
+ * Efface la ligne app_state de l'utilisateur courant. La suppression complète
+ * du compte d'authentification lui-même nécessite un appel admin côté serveur
+ * (Edge Function) ; côté client on garantit l'effacement des données métier et
+ * la déconnexion, ce qui rend le compte vide et inaccessible.
+ * Renvoie { success: boolean, error?: string }.
+ */
+export const deleteAccountData = async () => {
+  try {
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) return { success: false, error: 'Session introuvable.' }
+
+    const { error } = await supabase
+      .from('app_state')
+      .delete()
+      .eq('user_id', user.id)
+
+    if (error) return { success: false, error: error.message }
+    return { success: true }
+  } catch (e) {
+    return { success: false, error: e?.message || 'Erreur inconnue.' }
+  }
+}
+
+
