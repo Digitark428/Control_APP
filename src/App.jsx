@@ -4596,6 +4596,65 @@ const translateAuthError = (msg) => {
 // Tab bar
 // ---------------------------------------------------------------------------
 
+const DesktopSidebar = ({ tab, setTab, user, openAddTx, openAddVar }) => {
+  const items = [
+    { id: 'dashboard', label: 'Accueil',   icon: Home },
+    { id: 'revenue',   label: 'Revenus',   icon: Wallet },
+    { id: 'expenses',  label: 'Charges',   icon: Receipt },
+    { id: 'varexp',    label: 'Dépenses',  icon: ShoppingBag },
+    { id: 'controls',  label: 'Control.',  icon: Target },
+    { id: 'year',      label: 'Année',     icon: BarChart3 },
+  ];
+  const name = user?.user_metadata?.username || user?.user_metadata?.first_name || 'Mon compte';
+
+  return (
+    <aside className="hidden lg:flex lg:flex-col lg:w-[260px] lg:flex-shrink-0 lg:h-screen border-r border-white/[0.06] px-4 py-6"
+      style={{ background: 'rgba(10,10,12,0.6)', backdropFilter: 'blur(20px)' }}>
+      {/* Brand */}
+      <div className="flex items-center gap-2.5 px-3 mb-8">
+        <img src="/apple-touch-icon.png" alt="Control." className="w-9 h-9 rounded-xl" />
+        <span className="text-[19px] font-bold tracking-tight text-white">Control<span className="text-zinc-600">.</span></span>
+      </div>
+
+      {/* Action rapide */}
+      <button onClick={openAddTx}
+        className="flex items-center justify-center gap-2 w-full py-2.5 mb-1.5 bg-white text-black rounded-xl text-[13.5px] font-semibold active:scale-[0.98] hover:bg-zinc-100 transition-all">
+        <Plus className="w-4 h-4" /> Ajouter une vente
+      </button>
+      <button onClick={openAddVar}
+        className="flex items-center justify-center gap-2 w-full py-2.5 mb-6 bg-[#1C1C1E] border border-white/[0.06] text-white rounded-xl text-[13.5px] font-semibold active:scale-[0.98] hover:bg-[#252527] transition-all">
+        <ShoppingBag className="w-3.5 h-3.5 text-rose-400" /> Ajouter une dépense
+      </button>
+
+      {/* Nav */}
+      <nav className="flex flex-col gap-1 flex-1">
+        {items.map(it => {
+          const Icon = it.icon;
+          const active = tab === it.id;
+          return (
+            <button key={it.id} onClick={() => setTab(it.id)}
+              className={`flex items-center gap-3 px-3 py-2.5 rounded-xl text-[14px] font-medium transition-all ${
+                active ? 'bg-white/[0.08] text-white' : 'text-zinc-500 hover:text-zinc-300 hover:bg-white/[0.03]'}`}>
+              <Icon className="w-[18px] h-[18px]" strokeWidth={active ? 2.5 : 2} />
+              {it.label}
+            </button>
+          );
+        })}
+      </nav>
+
+      {/* Profil */}
+      <button onClick={() => setTab('profile')}
+        className={`flex items-center gap-3 px-3 py-2.5 rounded-xl text-[14px] font-medium transition-all ${
+          tab === 'profile' ? 'bg-white/[0.08] text-white' : 'text-zinc-500 hover:text-zinc-300 hover:bg-white/[0.03]'}`}>
+        <div className="w-7 h-7 rounded-full bg-zinc-800 flex items-center justify-center flex-shrink-0">
+          <User className="w-4 h-4 text-zinc-400" />
+        </div>
+        <span className="truncate">{name}</span>
+      </button>
+    </aside>
+  );
+};
+
 const TabBar = ({ tab, setTab }) => {
   const tabs = [
     { id: 'dashboard',  label: 'Accueil',   icon: Home },
@@ -4812,22 +4871,44 @@ export default function App() {
         * { -webkit-tap-highlight-color: transparent; }
         input[type="date"]::-webkit-calendar-picker-indicator { filter: invert(1); opacity: 0.5; }
         ::-webkit-scrollbar { display: none; }
+        @media (min-width: 1024px) {
+          .dk-ambient {
+            background:
+              radial-gradient(60vw 60vh at 18% 0%, rgba(48,209,88,0.06), transparent 60%),
+              radial-gradient(50vw 50vh at 100% 100%, rgba(94,92,230,0.07), transparent 55%),
+              #000;
+          }
+          .dk-content::-webkit-scrollbar { display: none; }
+        }
       `}</style>
 
-      <div className="max-w-md mx-auto min-h-screen">
-        <div className="pt-2">
-          {tab === 'dashboard' && <Dashboard state={state} setState={setState} year={year} month={month} setMonth={setMonth} openAddTx={() => setAddOpen(true)} openAddVar={() => setAddVarOpen(true)} setTab={setTab} user={user} />}
-          {tab === 'revenue'   && <RevenuePage state={state} setState={setState} year={year} month={month} setMonth={setMonth} openAddTx={() => setAddOpen(true)} />}
-          {tab === 'expenses'  && <ExpensesPage state={state} setState={setState} year={year} month={month} setMonth={setMonth} />}
-          {tab === 'varexp'    && <VarExpensesPage state={state} setState={setState} year={year} month={month} setMonth={setMonth} />}
-          {tab === 'controls'  && <ControlsPage state={state} setState={setState} />}
-          {tab === 'year'      && <YearPage state={state} year={year} setMonth={setMonth} setTab={setTab} />}
-          {tab === 'profile'   && <ProfilePage user={user} state={state} setState={setState} onSignOut={signOut} onExport={() => setExportOpen(true)} />}
-          {tab === 'settings'  && <SettingsPage state={state} setState={setState} user={user} onSignOut={signOut} onExport={() => setExportOpen(true)} />}
+      {/* ── DESKTOP SHELL (lg+) : sidebar + contenu centré ; mobile inchangé ── */}
+      <div className="lg:flex lg:h-screen lg:overflow-hidden dk-ambient">
+
+        {/* Sidebar desktop */}
+        <DesktopSidebar tab={tab} setTab={setTab} user={user} openAddTx={() => setAddOpen(true)} openAddVar={() => setAddVarOpen(true)} />
+
+        {/* Zone contenu */}
+        <div className="lg:flex-1 lg:h-screen lg:overflow-y-auto dk-content">
+          <div className="max-w-md mx-auto min-h-screen lg:max-w-[760px] lg:min-h-0 lg:py-10 lg:px-6">
+            <div className="pt-2 lg:pt-0">
+              {tab === 'dashboard' && <Dashboard state={state} setState={setState} year={year} month={month} setMonth={setMonth} openAddTx={() => setAddOpen(true)} openAddVar={() => setAddVarOpen(true)} setTab={setTab} user={user} />}
+              {tab === 'revenue'   && <RevenuePage state={state} setState={setState} year={year} month={month} setMonth={setMonth} openAddTx={() => setAddOpen(true)} />}
+              {tab === 'expenses'  && <ExpensesPage state={state} setState={setState} year={year} month={month} setMonth={setMonth} />}
+              {tab === 'varexp'    && <VarExpensesPage state={state} setState={setState} year={year} month={month} setMonth={setMonth} />}
+              {tab === 'controls'  && <ControlsPage state={state} setState={setState} />}
+              {tab === 'year'      && <YearPage state={state} year={year} setMonth={setMonth} setTab={setTab} />}
+              {tab === 'profile'   && <ProfilePage user={user} state={state} setState={setState} onSignOut={signOut} onExport={() => setExportOpen(true)} />}
+              {tab === 'settings'  && <SettingsPage state={state} setState={setState} user={user} onSignOut={signOut} onExport={() => setExportOpen(true)} />}
+            </div>
+          </div>
         </div>
       </div>
 
-      <TabBar tab={tab} setTab={setTab} />
+      {/* TabBar mobile uniquement */}
+      <div className="lg:hidden">
+        <TabBar tab={tab} setTab={setTab} />
+      </div>
 
       <AddTransactionSheet
         open={addOpen}
