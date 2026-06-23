@@ -1,0 +1,12 @@
+{
+  "name": "Control.",
+  "short_name": "Control.",
+  "description": "Reprenez le contrôle de vos finances.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#000000",
+  "theme_color": "#000000",
+  "icons": [
+    { "src": "/apple-touch-icon.png", "sizes": "1024x1024", "type": "image/png", "purpose": "any" }
+  ]
+}
